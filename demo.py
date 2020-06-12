@@ -56,14 +56,14 @@ def demo(opt):
         # num[0,1] = len(list1)
         proposals = proposals[:,:max(int(max(num[:,1])),1),:]
 
-        input_imgs.data.resize_(img.size()).copy_(img)
-        input_seqs.data.resize_(iseq.size()).copy_(iseq)
-        gt_seqs.data.resize_(gts_seq.size()).copy_(gts_seq)
-        input_num.data.resize_(num.size()).copy_(num)
-        input_ppls.data.resize_(proposals.size()).copy_(proposals)
-        gt_bboxs.data.resize_(bboxs.size()).copy_(bboxs)
-        mask_bboxs.data.resize_(box_mask.size()).copy_(box_mask)
-        input_imgs.data.resize_(img.size()).copy_(img)
+        input_imgs.resize_(img.size()).copy_(img)
+        input_seqs.resize_(iseq.size()).copy_(iseq)
+        gt_seqs.resize_(gts_seq.size()).copy_(gts_seq)
+        input_num.resize_(num.size()).copy_(num)
+        input_ppls.resize_(proposals.size()).copy_(proposals)
+        gt_bboxs.resize_(bboxs.size()).copy_(bboxs)
+        mask_bboxs.resize_(box_mask.size()).copy_(box_mask)
+        input_imgs.resize_(img.size()).copy_(img)
 
         eval_opt = {'sample_max':1, 'beam_size': opt.beam_size, 'inference_mode' : True, 'tag_size' : opt.cbs_tag_size}
         seq, bn_seq, fg_seq, _, _, _ = model._sample(input_imgs, input_ppls, input_num, eval_opt)
@@ -129,10 +129,10 @@ def demo(opt):
         # plt.axis('off')
         # plt.axis('tight')
         # plt.tight_layout()
-        fig.savefig('visu/%d.jpg' %(img_id[0]), bbox_inches='tight', pad_inches=0, dpi=150)
-        print(str(img_id[0]) + ': ' + sents[0])
+        fig.savefig('visu/%d.jpg' %(img_id[0].item()), bbox_inches='tight', pad_inches=0, dpi=150)
+        print(str(img_id[0].item()) + ': ' + sents[0])
 
-        entry = {'image_id': img_id[0], 'caption': sents[0]}
+        entry = {'image_id': img_id[0].item(), 'caption': sents[0]}
         predictions.append(entry)
 
     return predictions
@@ -148,7 +148,7 @@ if __name__ == '__main__':
                     help='Do we load previous best score when resuming training.')     
     parser.add_argument('--id', type=str, default='',
                     help='an id identifying this run/job. used in cross-val and appended when writing progress files')
-    parser.add_argument('--image_path', type=str, default='/home/jiasen/data/coco/images/',
+    parser.add_argument('--image_path', type=str, default='/home/fanfu/newdisk/dataset/coco/2014',
                     help='path to the h5file containing the image data')
     parser.add_argument('--cbs', type=bool, default=False,
                     help='whether use constraint beam search.')
@@ -175,8 +175,10 @@ if __name__ == '__main__':
             model_path = os.path.join(args.start_from, 'model.pth')
             info_path = os.path.join(args.start_from, 'infos_'+args.id+'.pkl')
 
+        # import pdb
+        # pdb.set_trace()
             # open old infos and check if models are compatible
-        with open(info_path) as f:
+        with open(info_path, 'rb') as f:
             infos = cPickle.load(f)
             opt = infos['opt']
             opt.image_path = args.image_path
@@ -202,6 +204,7 @@ if __name__ == '__main__':
     ####################################################################################
     # Data Loader
     ####################################################################################
+    opt.data_path = 'data'
     dataset_val = DataLoader(opt, split='test')
     dataloader_val = torch.utils.data.DataLoader(dataset_val, batch_size=1,
                                             shuffle=False, num_workers=0)
@@ -248,7 +251,6 @@ if __name__ == '__main__':
     opt.ltow = dataset_val.ltow
     opt.itoc = dataset_val.itoc
 
-    pdb.set_trace()
     if opt.att_model == 'topdown':
         model = AttModel.TopDownModel(opt)
     elif opt.att_model == 'att2in2':
@@ -262,14 +264,15 @@ if __name__ == '__main__':
         print('Loading the model %s...' %(model_path))
         model.load_state_dict(torch.load(model_path))
         if os.path.isfile(os.path.join(args.start_from, 'histories_'+opt.id+'.pkl')):
-            with open(os.path.join(args.start_from, 'histories_'+opt.id+'.pkl')) as f:
+            with open(os.path.join(args.start_from, 'histories_'+opt.id+'.pkl'), 'rb') as f:
                 histories = cPickle.load(f)
 
     if opt.cuda:
         model.cuda()
 
     predictions = demo(opt)
-
+    # import pdb
+    # pdb.set_trace()
     print('saving...')
     json.dump(predictions, open('visu.json', 'w'))
 

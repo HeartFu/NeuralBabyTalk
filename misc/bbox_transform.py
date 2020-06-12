@@ -209,8 +209,11 @@ def bbox_overlaps_batch(anchors, gt_boxes):
         overlaps = iw * ih / ua
 
         # mask the overlap here.
-        overlaps.masked_fill_(gt_area_zero.view(batch_size, 1, K).expand(batch_size, N, K), 0)
-        overlaps.masked_fill_(anchors_area_zero.view(batch_size, N, 1).expand(batch_size, N, K), -1)
+        # FF: modify warning, change gt_area_zero and anchors_area_zero with 0/1 to False/True
+        overlaps.masked_fill_(gt_area_zero.view(batch_size, 1, K).expand(batch_size, N, K).bool(), 0)
+        overlaps.masked_fill_(anchors_area_zero.view(batch_size, N, 1).expand(batch_size, N, K).bool(), -1)
+        # overlaps.masked_fill_(gt_area_zero.view(batch_size, 1, K).expand(batch_size, N, K), 0)
+        # overlaps.masked_fill_(anchors_area_zero.view(batch_size, N, 1).expand(batch_size, N, K), -1)
     
     elif anchors.dim() == 3:
         N = anchors.size(1)
@@ -249,8 +252,11 @@ def bbox_overlaps_batch(anchors, gt_boxes):
         overlaps = iw * ih / ua
 
         # mask the overlap here.
-        overlaps.masked_fill_(gt_area_zero.view(batch_size, 1, K).expand(batch_size, N, K), 0)
-        overlaps.masked_fill_(anchors_area_zero.view(batch_size, N, 1).expand(batch_size, N, K), -1)
+        # FF: modify warning, change gt_area_zero and anchors_area_zero with 0/1 to False/True
+        overlaps.masked_fill_(gt_area_zero.view(batch_size, 1, K).expand(batch_size, N, K).bool(), 0)
+        overlaps.masked_fill_(anchors_area_zero.view(batch_size, N, 1).expand(batch_size, N, K).bool(), -1)
+        # overlaps.masked_fill_(gt_area_zero.view(batch_size, 1, K).expand(batch_size, N, K), 0)
+        # overlaps.masked_fill_(anchors_area_zero.view(batch_size, N, 1).expand(batch_size, N, K), -1)
     else:
         raise ValueError('anchors input dimension is not correct.')
     

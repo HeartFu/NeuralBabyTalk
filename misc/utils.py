@@ -517,7 +517,9 @@ def bbox_target(rois, mask, overlaps, seq, seq_update, vocab_size):
     max_rois = rois.size(1)
     batch_size = rois.size(0)
 
-    overlaps_copy.masked_fill_(mask.view(batch_size*5, 1, -1).expand_as(overlaps_copy), 0)
+    # FF: modify warning, change gt_area_zero and anchors_area_zero with 0/1 to False/True
+    # overlaps_copy.masked_fill_(mask.view(batch_size*5, 1, -1).expand_as(overlaps_copy), 0)
+    overlaps_copy.masked_fill_(mask.view(batch_size * 5, 1, -1).expand_as(overlaps_copy).bool(), 0)
     max_overlaps, gt_assignment = torch.max(overlaps_copy, 2)
     # get the scores.
     scores = rois[:,:,5].contiguous().view(batch_size,1,-1).expand(batch_size,5,max_rois)\

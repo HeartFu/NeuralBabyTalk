@@ -13,24 +13,29 @@ import os
 import pickle
 import torch.backends.cudnn as cudnn
 import yaml
+from tqdm import tqdm
 
 import opts
 from misc import utils, eval_utils, AttModel
 import yaml
 
+import wandb
+
 # from misc.rewards import get_self_critical_reward
 import torchvision.transforms as transforms
 import pdb
 
-try:
-    import tensorflow as tf
-except ImportError:
-    print("Tensorflow not installed; No tensorboard logging.")
-    tf = None
+# try:
+#     import tensorflow as tf
+# except ImportError:
+#     print("Tensorflow not installed; No tensorboard logging.")
+#     tf = None
 
-def add_summary_value(writer, key, value, iteration):
-    summary = tf.Summary(value=[tf.Summary.Value(tag=key, simple_value=value)])
-    writer.add_summary(summary, iteration)
+
+# def add_summary_value(writer, key, value, iteration):
+#     summary = tf.Summary(value=[tf.Summary.Value(tag=key, simple_value=value)])
+#     writer.add_summary(summary, iteration)
+
 
 def train(epoch, opt):
     model.train()
@@ -38,42 +43,65 @@ def train(epoch, opt):
     #########################################################################################
     # Training begins here
     #########################################################################################
-    data_iter = iter(dataloader)
+    # data_iter = iter(dataloader)
     lm_loss_temp = 0
     bn_loss_temp = 0
     fg_loss_temp = 0
+    total_loss_temp = 0
     cider_temp = 0
     rl_loss_temp = 0
     start = time.time()
-
-    for step in range(len(dataloader)-1):
-        data = data_iter.next()
+    # for step in range(len(dataloader)-1):
+    # data = data_iter.next()
+    # FF: Add TQDM Progress bar
+    count = 0
+    progress_bar = tqdm(dataloader, desc='|Train Epoch {}'.format(epoch), leave=False)
+    for step, data in enumerate(progress_bar):
+        count += 1
         img, iseq, gts_seq, num, proposals, bboxs, box_mask, img_id = data
-        proposals = proposals[:,:max(int(max(num[:,1])),1),:]
-        bboxs = bboxs[:,:int(max(num[:,2])),:]
-        box_mask = box_mask[:,:,:max(int(max(num[:,2])),1),:]
+        proposals = proposals[:, :max(int(max(num[:, 1])), 1), :]
+        bboxs = bboxs[:, :int(max(num[:, 2])), :]
+        box_mask = box_mask[:, :, :max(int(max(num[:, 2])), 1), :]
 
-        input_imgs.data.resize_(img.size()).copy_(img)
-        input_seqs.data.resize_(iseq.size()).copy_(iseq)
-        gt_seqs.data.resize_(gts_seq.size()).copy_(gts_seq)
-        input_num.data.resize_(num.size()).copy_(num)
-        input_ppls.data.resize_(proposals.size()).copy_(proposals)
-        gt_bboxs.data.resize_(bboxs.size()).copy_(bboxs)
-        mask_bboxs.data.resize_(box_mask.size()).copy_(box_mask)
+        # with torch.no_grad():
+        input_imgs.resize_(img.size()).copy_(img)
+        input_seqs.resize_(iseq.size()).copy_(iseq)
+        gt_seqs.resize_(gts_seq.size()).copy_(gts_seq)
+        input_num.resize_(num.size()).copy_(num)
+        input_ppls.resize_(proposals.size()).copy_(proposals)
+        gt_bboxs.resize_(bboxs.size()).copy_(bboxs)
+        mask_bboxs.resize_(box_mask.size()).copy_(box_mask)
+        # mask_bboxs.resize_(box_mask.size()).copy_(box_mask)
+
+        # mask_bboxs = mask_bboxs.bool()
+        # input_imgs.data.resize_(img.size()).copy_(img)
+        # input_seqs.data.resize_(iseq.size()).copy_(iseq)
+        # gt_seqs.data.resize_(gts_seq.size()).copy_(gts_seq)
+        # input_num.data.resize_(num.size()).copy_(num)
+        # input_ppls.data.resize_(proposals.size()).copy_(proposals)
+        # gt_bboxs.data.resize_(bboxs.size()).copy_(bboxs)
+        # mask_bboxs.data.resize_(box_mask.size()).copy_(box_mask)
         loss = 0
         if opt.self_critical:
-            rl_loss, bn_loss, fg_loss, cider_score = model(input_imgs, input_seqs, gt_seqs, input_num, input_ppls, gt_bboxs, mask_bboxs, 'RL')
+            rl_loss, bn_loss, fg_loss, cider_score = model(input_imgs, input_seqs, gt_seqs, input_num, input_ppls,
+                                                           gt_bboxs, mask_bboxs, 'RL')
             cider_temp += cider_score.sum().data[0] / cider_score.numel()
             loss += (rl_loss.sum() + bn_loss.sum() + fg_loss.sum()) / rl_loss.numel()
-            rl_loss_temp += loss.data[0]
+            rl_loss_temp += loss.item()
 
         else:
-            lm_loss, bn_loss, fg_loss = model(input_imgs, input_seqs, gt_seqs, input_num, input_ppls, gt_bboxs, mask_bboxs, 'MLE')
+            lm_loss, bn_loss, fg_loss = model(input_imgs, input_seqs, gt_seqs, input_num, input_ppls, gt_bboxs,
+                                              mask_bboxs, 'MLE')
             loss += (lm_loss.sum() + bn_loss.sum() + fg_loss.sum()) / lm_loss.numel()
 
-            lm_loss_temp += lm_loss.sum().data[0] / lm_loss.numel()
-            bn_loss_temp += bn_loss.sum().data[0] / lm_loss.numel()
-            fg_loss_temp += fg_loss.sum().data[0] / lm_loss.numel()
+            # FF: modify data[0] to tensor.item()
+            lm_loss_temp += lm_loss.sum().item() / lm_loss.numel()
+            bn_loss_temp += bn_loss.sum().item() / lm_loss.numel()
+            fg_loss_temp += fg_loss.sum().item() / lm_loss.numel()
+            total_loss_temp += loss.item()
+            # lm_loss_temp += lm_loss.sum().data[0] / lm_loss.numel()
+            # bn_loss_temp += bn_loss.sum().data[0] / lm_loss.numel()
+            # fg_loss_temp += fg_loss.sum().data[0] / lm_loss.numel()
 
         model.zero_grad()
         loss.backward()
@@ -84,38 +112,71 @@ def train(epoch, opt):
         # if opt.finetune_cnn:
         #     utils.clip_gradient(cnn_optimizer, opt.grad_clip)
         #     cnn_optimizer.step()
-
-        if step % opt.disp_interval == 0 and step != 0:
-            end = time.time()
-            lm_loss_temp /= opt.disp_interval
-            bn_loss_temp /= opt.disp_interval
-            fg_loss_temp /= opt.disp_interval
-            rl_loss_temp /= opt.disp_interval
-
-            cider_temp /= opt.disp_interval
-            print("step {}/{} (epoch {}), lm_loss = {:.3f}, bn_loss = {:.3f}, fg_loss = {:.3f}, rl_loss = {:.3f}, cider_score = {:.3f}, lr = {:.5f}, time/batch = {:.3f}" \
-                .format(step, len(dataloader), epoch, lm_loss_temp, bn_loss_temp, fg_loss_temp, rl_loss_temp, cider_temp, opt.learning_rate, end - start))
-            start = time.time()
-
-            lm_loss_temp = 0
-            bn_loss_temp = 0
-            fg_loss_temp = 0
-            cider_temp = 0
-            rl_loss_temp = 0
+        progress_bar.set_postfix({'lm_loss': '{:.3f}'.format(lm_loss.sum().item() / lm_loss.numel()),
+                                  'bn_loss': '{:.3f}'.format(bn_loss.sum().item() / lm_loss.numel()),
+                                  'fg_loss': '{:.3f}'.format(fg_loss.sum().item() / lm_loss.numel()),
+                                  'total_loss': '{:.3f}'.format(loss.item()),
+                                  'rl_loss': '{:.3f}'.format(rl_loss_temp / count),
+                                  'cider_score': '{:.3f}'.format(cider_temp / count),
+                                  'lr': '{:.5f}'.format(opt.learning_rate),
+                                  },
+                                 refresh=True)
+        # if step % opt.disp_interval == 0 and step != 0:
+        #     end = time.time()
+        #     lm_loss_temp /= opt.disp_interval
+        #     bn_loss_temp /= opt.disp_interval
+        #     fg_loss_temp /= opt.disp_interval
+        #     rl_loss_temp /= opt.disp_interval
+        #
+        #     cider_temp /= opt.disp_interval
+        #     print(
+        #         "step {}/{} (epoch {}), lm_loss = {:.3f}, bn_loss = {:.3f}, fg_loss = {:.3f}, rl_loss = {:.3f}, cider_score = {:.3f}, lr = {:.5f}, time/batch = {:.3f}" \
+        #         .format(step, len(dataloader), epoch, lm_loss_temp, bn_loss_temp, fg_loss_temp, rl_loss_temp,
+        #                 cider_temp, opt.learning_rate, end - start))
+        #     start = time.time()
+        #
+        #     lm_loss_temp = 0
+        #     bn_loss_temp = 0
+        #     fg_loss_temp = 0
+        #     cider_temp = 0
+        #     rl_loss_temp = 0
+        #     count = 0
 
         # Write the training loss summary
-        if (iteration % opt.losses_log_every == 0):
-            if tf is not None:
-                add_summary_value(tf_summary_writer, 'train_loss', loss, iteration)
-                add_summary_value(tf_summary_writer, 'learning_rate', opt.learning_rate, iteration)
-                # add_summary_value(tf_summary_writer, 'scheduled_sampling_prob', model.ss_prob, iteration)
-                if opt.self_critical:
-                    add_summary_value(tf_summary_writer, 'cider_score', cider_score.data[0], iteration)
-                tf_summary_writer.flush()
+        if iteration % opt.losses_log_every == 0:
+            # if tf is not None:
+            #     add_summary_value(tf_summary_writer, 'train_loss', loss, iteration)
+            #     add_summary_value(tf_summary_writer, 'learning_rate', opt.learning_rate, iteration)
+            #     # add_summary_value(tf_summary_writer, 'scheduled_sampling_prob', model.ss_prob, iteration)
+            #     if opt.self_critical:
+            #         add_summary_value(tf_summary_writer, 'cider_score', cider_score.item(), iteration)
+            #     tf_summary_writer.flush()
 
-            loss_history[iteration] = loss.data[0]
+            # use wand to observe the loss and lr
+            if wandb is not None:
+                wandb.log({
+                    'lm_loss': lm_loss.sum().item() / lm_loss.numel(),
+                    'bn_loss': bn_loss.sum().item() / lm_loss.numel(),
+                    'fg_loss': fg_loss.sum().item() / lm_loss.numel(),
+                    'total_loss': loss,
+                })
+
+            # FF: modify data[0] to torch.item() for get the value
+            loss_history[iteration] = loss.item()
+            # loss_history[iteration] = loss.data[0]
             lr_history[iteration] = opt.learning_rate
             # ss_prob_history[iteration] = model.ss_prob
+    end = time.time()
+    print("epoch: {}, lm_loss = {:.3f}, bn_loss = {:.3f}, fg_loss = {:.3f}, rl_loss = {:.3f}, cider_score = {:.3f}, lr = {:.5f}, time/batch = {:.3f}" \
+            .format(epoch, lm_loss_temp/count, bn_loss_temp/count, fg_loss_temp/count, rl_loss_temp/count,
+                    cider_temp/count, opt.learning_rate, end - start))
+    # return lm_loss_temp/count, bn_loss_temp/count, fg_loss_temp/count, total_loss_temp/count
+    wandb.log({
+        'lm_loss_epoch': lm_loss_temp/count / lm_loss.numel(),
+        'bn_loss_epoch': bn_loss_temp/count,
+        'fg_loss_epoch': fg_loss_temp/count,
+        'total_loss_epoch': total_loss_temp/count,
+    })
 
 def eval(opt):
     model.eval()
@@ -133,35 +194,38 @@ def eval(opt):
         data = data_iter_val.next()
         img, iseq, gts_seq, num, proposals, bboxs, box_mask, img_id = data
 
-        proposals = proposals[:,:max(int(max(num[:,1])),1),:]
+        proposals = proposals[:, :max(int(max(num[:, 1])), 1), :]
 
-        input_imgs.data.resize_(img.size()).copy_(img)
-        input_seqs.data.resize_(iseq.size()).copy_(iseq)
-        gt_seqs.data.resize_(gts_seq.size()).copy_(gts_seq)
-        input_num.data.resize_(num.size()).copy_(num)
-        input_ppls.data.resize_(proposals.size()).copy_(proposals)
-        gt_bboxs.data.resize_(bboxs.size()).copy_(bboxs)
-        mask_bboxs.data.resize_(box_mask.size()).copy_(box_mask)
-        input_imgs.data.resize_(img.size()).copy_(img)
+        # FF: Fix the bug with .data not run in the Pytorch
+        input_imgs.resize_(img.size()).copy_(img)
+        input_seqs.resize_(iseq.size()).copy_(iseq)
+        gt_seqs.resize_(gts_seq.size()).copy_(gts_seq)
+        input_num.resize_(num.size()).copy_(num)
+        input_ppls.resize_(proposals.size()).copy_(proposals)
+        gt_bboxs.resize_(bboxs.size()).copy_(bboxs)
+        # FF: modify 0/1 to true/false
+        mask_bboxs.resize_(box_mask.size()).copy_(box_mask.bool())
+        # mask_bboxs.data.resize_(box_mask.size()).copy_(box_mask)
+        input_imgs.resize_(img.size()).copy_(img)
 
-        eval_opt = {'sample_max':1, 'beam_size': opt.beam_size, 'inference_mode' : True, 'tag_size' : opt.cbs_tag_size}
-        seq, bn_seq, fg_seq =  model(input_imgs, input_seqs, gt_seqs, \
-                                input_num, input_ppls, gt_bboxs, mask_bboxs, 'sample', eval_opt)
+        eval_opt = {'sample_max': 1, 'beam_size': opt.beam_size, 'inference_mode': True, 'tag_size': opt.cbs_tag_size}
+        seq, bn_seq, fg_seq = model(input_imgs, input_seqs, gt_seqs, \
+                                    input_num, input_ppls, gt_bboxs, mask_bboxs, 'sample', eval_opt)
 
         sents = utils.decode_sequence(dataset.itow, dataset.itod, dataset.ltow, dataset.itoc, dataset.wtod, \
-                                    seq.data, bn_seq.data, fg_seq.data, opt.vocab_size, opt)
+                                      seq.data, bn_seq.data, fg_seq.data, opt.vocab_size, opt)
         for k, sent in enumerate(sents):
             entry = {'image_id': img_id[k].item(), 'caption': sent}
             predictions.append(entry)
             if num_show < 20:
-                print('image %s: %s' %(entry['image_id'], entry['caption']))
+                print('image %s: %s' % (entry['image_id'], entry['caption']))
                 num_show += 1
 
         if count % 100 == 0:
             print(count)
         count += 1
 
-    print('Total image to be evaluated %d' %(len(predictions)))
+    print('Total image to be evaluated %d' % (len(predictions)))
     lang_stats = None
     if opt.language_eval == 1:
         if opt.decode_noc:
@@ -169,20 +233,21 @@ def eval(opt):
         else:
             lang_stats = utils.language_eval(opt.dataset, predictions, str(1), opt.val_split, opt)
 
-
     print('Saving the predictions')
     if opt.inference_only:
         import json
         pdb.set_trace()
 
     # Write validation result into summary
-    if tf is not None:
-        for k,v in lang_stats.items():
-            add_summary_value(tf_summary_writer, k, v, iteration)
-        tf_summary_writer.flush()
+    # if tf is not None:
+    #     for k, v in lang_stats.items():
+    #         add_summary_value(tf_summary_writer, k, v, iteration)
+    #     tf_summary_writer.flush()
     val_result_history[iteration] = {'lang_stats': lang_stats, 'predictions': predictions}
-
+    if wandb is not None:
+        wandb.log({k: v for k, v in lang_stats.items()})
     return lang_stats
+
 
 ####################################################################################
 # Main
@@ -190,11 +255,11 @@ def eval(opt):
 # initialize the data holder.
 
 if __name__ == '__main__':
-
+    wandb.init(project="neural_baby_talk")
     opt = opts.parse_opt()
     if opt.path_opt is not None:
         with open(opt.path_opt, 'r') as handle:
-            options_yaml = yaml.load(handle)
+            options_yaml = yaml.load(handle, Loader=yaml.FullLoader)
         utils.update_values(options_yaml, vars(opt))
     print(opt)
     cudnn.benchmark = True
@@ -212,11 +277,11 @@ if __name__ == '__main__':
     ####################################################################################
     dataset = DataLoader(opt, split='train')
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batch_size,
-                                            shuffle=False, num_workers=opt.num_workers)
+                                             shuffle=False, num_workers=opt.num_workers)
 
     dataset_val = DataLoader(opt, split=opt.val_split)
     dataloader_val = torch.utils.data.DataLoader(dataset_val, batch_size=opt.batch_size,
-                                            shuffle=False, num_workers=opt.num_workers)
+                                                 shuffle=False, num_workers=opt.num_workers)
 
     input_imgs = torch.FloatTensor(1)
     input_seqs = torch.LongTensor(1)
@@ -261,23 +326,23 @@ if __name__ == '__main__':
     opt.ltow = dataset.ltow
     opt.itoc = dataset.itoc
 
-    if not opt.finetune_cnn: opt.fixed_block = 4 # if not finetune, fix all cnn block
+    if not opt.finetune_cnn: opt.fixed_block = 4  # if not finetune, fix all cnn block
 
     if opt.att_model == 'topdown':
         model = AttModel.TopDownModel(opt)
     elif opt.att_model == 'att2in2':
         model = AttModel.Att2in2Model(opt)
 
-    tf_summary_writer = tf and tf.summary.FileWriter(opt.checkpoint_path)
+    # tf_summary_writer = tf and tf.compat.v1.summary.FileWriter(opt.checkpoint_path)
     infos = {}
     histories = {}
     if opt.start_from is not None:
         if opt.load_best_score == 1:
             model_path = os.path.join(opt.start_from, 'model-best.pth')
-            info_path = os.path.join(opt.start_from, 'infos_'+opt.id+'-best.pkl')
+            info_path = os.path.join(opt.start_from, 'infos_' + opt.id + '-best.pkl')
         else:
             model_path = os.path.join(opt.start_from, 'model.pth')
-            info_path = os.path.join(opt.start_from, 'infos_'+opt.id+'.pkl')
+            info_path = os.path.join(opt.start_from, 'infos_' + opt.id + '.pkl')
 
             # open old infos and check if models are compatible
         with open(info_path, 'rb') as f:
@@ -285,11 +350,11 @@ if __name__ == '__main__':
             saved_model_opt = infos['opt']
 
         # opt.learning_rate = saved_model_opt.learning_rate
-        print('Loading the model %s...' %(model_path))
+        print('Loading the model %s...' % (model_path))
         model.load_state_dict(torch.load(model_path))
 
-        if os.path.isfile(os.path.join(opt.start_from, 'histories_'+opt.id+'.pkl')):
-            with open(os.path.join(opt.start_from, 'histories_'+opt.id+'.pkl')) as f:
+        if os.path.isfile(os.path.join(opt.start_from, 'histories_' + opt.id + '.pkl')):
+            with open(os.path.join(opt.start_from, 'histories_' + opt.id + '.pkl'), 'rb') as f:
                 histories = pickle.load(f)
 
     if opt.decode_noc:
@@ -315,19 +380,19 @@ if __name__ == '__main__':
     for key, value in dict(model.named_parameters()).items():
         if value.requires_grad:
             if 'cnn' in key:
-                params += [{'params':[value], 'lr':opt.cnn_learning_rate,
-                        'weight_decay':opt.cnn_weight_decay, 'betas':(opt.cnn_optim_alpha, opt.cnn_optim_beta)}]
+                params += [{'params': [value], 'lr': opt.cnn_learning_rate,
+                            'weight_decay': opt.cnn_weight_decay, 'betas': (opt.cnn_optim_alpha, opt.cnn_optim_beta)}]
             else:
-                params += [{'params':[value], 'lr':opt.learning_rate,
-                    'weight_decay':opt.weight_decay, 'betas':(opt.optim_alpha, opt.optim_beta)}]
+                params += [{'params': [value], 'lr': opt.learning_rate,
+                            'weight_decay': opt.weight_decay, 'betas': (opt.optim_alpha, opt.optim_beta)}]
 
-    print("Use %s as optmization method" %(opt.optim))
+    print("Use %s as optmization method" % (opt.optim))
     if opt.optim == 'sgd':
         optimizer = optim.SGD(params, momentum=0.9)
     elif opt.optim == 'adam':
         optimizer = optim.Adam(params)
     elif opt.optim == 'adamax':
-    	optimizer = optim.Adamax(params)
+        optimizer = optim.Adamax(params)
 
     # if opt.cnn_optim == 'sgd':
     #     cnn_optimizer = optim.SGD(cnn_params, momentum=0.9)
@@ -336,22 +401,25 @@ if __name__ == '__main__':
     # load optimizer
     # learning_rate_list = np.linspace(opt.learning_rate, 0.0005, opt.max_epochs)
 
+    # monitor the model with wandb
+    wandb.watch(model)
+
     for epoch in range(start_epoch, opt.max_epochs):
         if epoch > opt.learning_rate_decay_start and opt.learning_rate_decay_start >= 0:
             if (epoch - opt.learning_rate_decay_start) % opt.learning_rate_decay_every == 0:
                 # decay the learning rate.
                 utils.set_lr(optimizer, opt.learning_rate_decay_rate)
-                opt.learning_rate  = opt.learning_rate * opt.learning_rate_decay_rate
+                opt.learning_rate = opt.learning_rate * opt.learning_rate_decay_rate
 
         if epoch > opt.scheduled_sampling_start and opt.scheduled_sampling_start >= 0:
             frac = (epoch - opt.scheduled_sampling_start) // opt.scheduled_sampling_increase_every
-            opt.ss_prob = min(opt.scheduled_sampling_increase_prob  * frac, opt.scheduled_sampling_max_prob)
+            opt.ss_prob = min(opt.scheduled_sampling_increase_prob * frac, opt.scheduled_sampling_max_prob)
             model.ss_prob = opt.ss_prob
 
         if not opt.inference_only:
             train(epoch, opt)
 
-        if epoch % opt.val_every_epoch == 0:
+        if (epoch + 1) % opt.val_every_epoch == 0:
             lang_stats = eval(opt)
             # Save model if is improving on validation result
             current_score = lang_stats['CIDEr']
@@ -380,9 +448,9 @@ if __name__ == '__main__':
             histories['loss_history'] = loss_history
             histories['lr_history'] = lr_history
             histories['ss_prob_history'] = ss_prob_history
-            with open(os.path.join(opt.checkpoint_path, 'infos_'+opt.id+'.pkl'), 'wb') as f:
+            with open(os.path.join(opt.checkpoint_path, 'infos_' + opt.id + '.pkl'), 'wb') as f:
                 pickle.dump(infos, f)
-            with open(os.path.join(opt.checkpoint_path, 'histories_'+opt.id+'.pkl'), 'wb') as f:
+            with open(os.path.join(opt.checkpoint_path, 'histories_' + opt.id + '.pkl'), 'wb') as f:
                 pickle.dump(histories, f)
 
             if best_flag:
@@ -393,5 +461,5 @@ if __name__ == '__main__':
                     torch.save(model.state_dict(), checkpoint_path)
 
                 print("model saved to {} with best cider score {:.3f}".format(checkpoint_path, best_val_score))
-                with open(os.path.join(opt.checkpoint_path, 'infos_'+opt.id+'-best.pkl'), 'wb') as f:
+                with open(os.path.join(opt.checkpoint_path, 'infos_' + opt.id + '-best.pkl'), 'wb') as f:
                     pickle.dump(infos, f)

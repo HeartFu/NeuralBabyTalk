@@ -30,6 +30,7 @@ lib64/
 parts/
 sdist/
 var/
+
 *.egg-info/
 .installed.cfg
 *.egg
@@ -80,3 +81,7 @@ ENV/
 .idea
 media/
 db.sqlite3
+
+# Demo
+visu/
+visu.json
