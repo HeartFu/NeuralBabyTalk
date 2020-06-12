@@ -16,6 +16,7 @@ import yaml
 from tqdm import tqdm
 
 import opts
+from eval_tools import eval_NBT
 from misc import utils, eval_utils, AttModel
 import yaml
 
@@ -178,76 +179,76 @@ def train(epoch, opt):
         'total_loss_epoch': total_loss_temp/count,
     })
 
-def eval(opt):
-    model.eval()
-    #########################################################################################
-    # eval begins here
-    #########################################################################################
-    data_iter_val = iter(dataloader_val)
-    loss_temp = 0
-    start = time.time()
-
-    num_show = 0
-    predictions = []
-    count = 0
-    for step in range(len(dataloader_val)):
-        data = data_iter_val.next()
-        img, iseq, gts_seq, num, proposals, bboxs, box_mask, img_id = data
-
-        proposals = proposals[:, :max(int(max(num[:, 1])), 1), :]
-
-        # FF: Fix the bug with .data not run in the Pytorch
-        input_imgs.resize_(img.size()).copy_(img)
-        input_seqs.resize_(iseq.size()).copy_(iseq)
-        gt_seqs.resize_(gts_seq.size()).copy_(gts_seq)
-        input_num.resize_(num.size()).copy_(num)
-        input_ppls.resize_(proposals.size()).copy_(proposals)
-        gt_bboxs.resize_(bboxs.size()).copy_(bboxs)
-        # FF: modify 0/1 to true/false
-        mask_bboxs.resize_(box_mask.size()).copy_(box_mask.bool())
-        # mask_bboxs.data.resize_(box_mask.size()).copy_(box_mask)
-        input_imgs.resize_(img.size()).copy_(img)
-
-        eval_opt = {'sample_max': 1, 'beam_size': opt.beam_size, 'inference_mode': True, 'tag_size': opt.cbs_tag_size}
-        seq, bn_seq, fg_seq = model(input_imgs, input_seqs, gt_seqs, \
-                                    input_num, input_ppls, gt_bboxs, mask_bboxs, 'sample', eval_opt)
-
-        sents = utils.decode_sequence(dataset.itow, dataset.itod, dataset.ltow, dataset.itoc, dataset.wtod, \
-                                      seq.data, bn_seq.data, fg_seq.data, opt.vocab_size, opt)
-        for k, sent in enumerate(sents):
-            entry = {'image_id': img_id[k].item(), 'caption': sent}
-            predictions.append(entry)
-            if num_show < 20:
-                print('image %s: %s' % (entry['image_id'], entry['caption']))
-                num_show += 1
-
-        if count % 100 == 0:
-            print(count)
-        count += 1
-
-    print('Total image to be evaluated %d' % (len(predictions)))
-    lang_stats = None
-    if opt.language_eval == 1:
-        if opt.decode_noc:
-            lang_stats = utils.noc_eval(predictions, str(1), opt.val_split, opt)
-        else:
-            lang_stats = utils.language_eval(opt.dataset, predictions, str(1), opt.val_split, opt)
-
-    print('Saving the predictions')
-    if opt.inference_only:
-        import json
-        pdb.set_trace()
-
-    # Write validation result into summary
-    # if tf is not None:
-    #     for k, v in lang_stats.items():
-    #         add_summary_value(tf_summary_writer, k, v, iteration)
-    #     tf_summary_writer.flush()
-    val_result_history[iteration] = {'lang_stats': lang_stats, 'predictions': predictions}
-    if wandb is not None:
-        wandb.log({k: v for k, v in lang_stats.items()})
-    return lang_stats
-
+# def eval(opt):
+#     model.eval()
+#     #########################################################################################
+#     # eval begins here
+#     #########################################################################################
+#     data_iter_val = iter(dataloader_val)
+#     loss_temp = 0
+#     start = time.time()
+#
+#     num_show = 0
+#     predictions = []
+#     count = 0
+#     for step in range(len(dataloader_val)):
+#         data = data_iter_val.next()
+#         img, iseq, gts_seq, num, proposals, bboxs, box_mask, img_id = data
+#
+#         proposals = proposals[:, :max(int(max(num[:, 1])), 1), :]
+#
+#         # FF: Fix the bug with .data not run in the Pytorch
+#         input_imgs.resize_(img.size()).copy_(img)
+#         input_seqs.resize_(iseq.size()).copy_(iseq)
+#         gt_seqs.resize_(gts_seq.size()).copy_(gts_seq)
+#         input_num.resize_(num.size()).copy_(num)
+#         input_ppls.resize_(proposals.size()).copy_(proposals)
+#         gt_bboxs.resize_(bboxs.size()).copy_(bboxs)
+#         # FF: modify 0/1 to true/false
+#         mask_bboxs.resize_(box_mask.size()).copy_(box_mask.bool())
+#         # mask_bboxs.data.resize_(box_mask.size()).copy_(box_mask)
+#         input_imgs.resize_(img.size()).copy_(img)
+#
+#         eval_opt = {'sample_max': 1, 'beam_size': opt.beam_size, 'inference_mode': True, 'tag_size': opt.cbs_tag_size}
+#         seq, bn_seq, fg_seq = model(input_imgs, input_seqs, gt_seqs, \
+#                                     input_num, input_ppls, gt_bboxs, mask_bboxs, 'sample', eval_opt)
+#
+#         sents = utils.decode_sequence(dataset.itow, dataset.itod, dataset.ltow, dataset.itoc, dataset.wtod, \
+#                                       seq.data, bn_seq.data, fg_seq.data, opt.vocab_size, opt)
+#         for k, sent in enumerate(sents):
+#             entry = {'image_id': img_id[k].item(), 'caption': sent}
+#             predictions.append(entry)
+#             if num_show < 20:
+#                 print('image %s: %s' % (entry['image_id'], entry['caption']))
+#                 num_show += 1
+#
+#         if count % 100 == 0:
+#             print(count)
+#         count += 1
+#
+#     print('Total image to be evaluated %d' % (len(predictions)))
+#     lang_stats = None
+#     if opt.language_eval == 1:
+#         if opt.decode_noc:
+#             lang_stats = utils.noc_eval(predictions, str(1), opt.val_split, opt)
+#         else:
+#             lang_stats = utils.language_eval(opt.dataset, predictions, str(1), opt.val_split, opt)
+#
+#     print('Saving the predictions')
+#     if opt.inference_only:
+#         import json
+#         pdb.set_trace()
+#
+#     # Write validation result into summary
+#     # if tf is not None:
+#     #     for k, v in lang_stats.items():
+#     #         add_summary_value(tf_summary_writer, k, v, iteration)
+#     #     tf_summary_writer.flush()
+#     val_result_history[iteration] = {'lang_stats': lang_stats, 'predictions': predictions}
+#     if wandb is not None:
+#         wandb.log({k: v for k, v in lang_stats.items()})
+#     return lang_stats
+#
 
 ####################################################################################
 # Main
@@ -420,7 +421,10 @@ if __name__ == '__main__':
             train(epoch, opt)
 
         if (epoch + 1) % opt.val_every_epoch == 0:
-            lang_stats = eval(opt)
+            lang_stats, predictions = eval_NBT(opt, model, dataset_val)
+            val_result_history[iteration] = {'lang_stats': lang_stats, 'predictions': predictions}
+            if wandb is not None:
+                wandb.log({k: v for k, v in lang_stats.items()})
             # Save model if is improving on validation result
             current_score = lang_stats['CIDEr']
 

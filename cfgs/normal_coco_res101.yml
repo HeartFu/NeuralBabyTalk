@@ -22,4 +22,4 @@ val_split: 'test'
 val_images_use: -1
 cider_df: 'corpus'
 optim: 'adam'
-checkpoint_path: 'save/normal_coco_1024'
+checkpoint_path: 'save/normal_coco_1024_more10epoch'
