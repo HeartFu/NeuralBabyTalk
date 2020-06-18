@@ -26,6 +26,7 @@ import wandb
 import torchvision.transforms as transforms
 import pdb
 
+
 # try:
 #     import tensorflow as tf
 # except ImportError:
@@ -168,16 +169,18 @@ def train(epoch, opt):
             lr_history[iteration] = opt.learning_rate
             # ss_prob_history[iteration] = model.ss_prob
     end = time.time()
-    print("epoch: {}, lm_loss = {:.3f}, bn_loss = {:.3f}, fg_loss = {:.3f}, rl_loss = {:.3f}, cider_score = {:.3f}, lr = {:.5f}, time/batch = {:.3f}" \
-            .format(epoch, lm_loss_temp/count, bn_loss_temp/count, fg_loss_temp/count, rl_loss_temp/count,
-                    cider_temp/count, opt.learning_rate, end - start))
+    print(
+        "epoch: {}, lm_loss = {:.3f}, bn_loss = {:.3f}, fg_loss = {:.3f}, rl_loss = {:.3f}, cider_score = {:.3f}, lr = {:.5f}, time/batch = {:.3f}" \
+        .format(epoch, lm_loss_temp / count, bn_loss_temp / count, fg_loss_temp / count, rl_loss_temp / count,
+                cider_temp / count, opt.learning_rate, end - start))
     # return lm_loss_temp/count, bn_loss_temp/count, fg_loss_temp/count, total_loss_temp/count
     wandb.log({
-        'lm_loss_epoch': lm_loss_temp/count / lm_loss.numel(),
-        'bn_loss_epoch': bn_loss_temp/count,
-        'fg_loss_epoch': fg_loss_temp/count,
-        'total_loss_epoch': total_loss_temp/count,
+        'lm_loss_epoch': lm_loss_temp / count / lm_loss.numel(),
+        'bn_loss_epoch': bn_loss_temp / count,
+        'fg_loss_epoch': fg_loss_temp / count,
+        'total_loss_epoch': total_loss_temp / count,
     })
+
 
 # def eval(opt):
 #     model.eval()
@@ -255,8 +258,9 @@ def train(epoch, opt):
 ####################################################################################
 # initialize the data holder.
 
+# python main.py --path_opt cfgs/normal_coco_res101.yml --batch_size 20 --cuda True --num_workers 4 --max_epoch 50
 if __name__ == '__main__':
-    wandb.init(project="neural_baby_talk")
+    wandb.init(project="test")
     opt = opts.parse_opt()
     if opt.path_opt is not None:
         with open(opt.path_opt, 'r') as handle:
@@ -279,7 +283,8 @@ if __name__ == '__main__':
     dataset = DataLoader(opt, split='train')
     dataloader = torch.utils.data.DataLoader(dataset, batch_size=opt.batch_size,
                                              shuffle=False, num_workers=opt.num_workers)
-
+    # import pdb
+    # pdb.set_trace()
     dataset_val = DataLoader(opt, split=opt.val_split)
     dataloader_val = torch.utils.data.DataLoader(dataset_val, batch_size=opt.batch_size,
                                                  shuffle=False, num_workers=opt.num_workers)

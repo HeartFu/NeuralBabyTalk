@@ -5,6 +5,7 @@ from __future__ import print_function
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+from torchvision.models.detection import fasterrcnn_resnet50_fpn
 from torch.autograd import *
 import misc.utils as utils
 from misc.resnet import resnet
@@ -62,6 +63,13 @@ class AttModel(CaptionModel):
             self.cnn = resnet(opt, _num_layers=152, _fixed_block=opt.fixed_block, pretrained=True)
         elif opt.cnn_backend == 'vgg16':
             self.cnn = vgg16(opt, pretrained=True)
+
+        # Object Detection Model
+        # self.faster_rcnn = fasterrcnn_resnet50_fpn(pretrained=True)
+        # self.faster_rcnn.eval()
+        # self.ppls_threshold = opt.ppls_thresh
+        # self.max_proposal = 200
+        # self.det_oracle = opt.det_oracle
 
         self.det_fc = nn.Sequential(nn.Embedding(self.detect_size + 1, 300),
                                     nn.ReLU(),
@@ -153,8 +161,36 @@ class AttModel(CaptionModel):
         return (Variable(weight.new(self.num_layers, bsz, self.rnn_size).zero_()),
                 Variable(weight.new(self.num_layers, bsz, self.rnn_size).zero_()))
 
-    def _forward(self, img, seq, ppls, gt_boxes, mask_boxes, num):
+    def extract_proposals(self, img, gt_boxes, ppls_thresh=0.5):
+        pad_proposals = np.zeros((self.max_proposal, 6))
+        if self.det_oracle == False:
+            with torch.no_grad():
+                self.faster_rcnn.eval()
+                prediction = self.faster_rcnn(img)
+            scores = prediction[0]['scores']
+            pos = scores > ppls_thresh
+            num_pos = int(pos.num())
+            bboxes = prediction[0]['boxes'][:num_pos, :]
+            classes = prediction[0]['labels'][:num_pos, :]
+            scores_bboxes = prediction[0]['scores'][:num_pos, :]
+            proposals = torch.cat((bboxes, classes, scores_bboxes), 1)
+            # resize the proposals
+            # TODO: check whethe need resize proposal and RandomCrop(including on dataloader_coco)
+            # if self.training:
+            #     proposals = utils.resize_bbox(proposals, width, height, self.opt.image_size, self.opt.image_size)
+            # img, proposals, gt_bboxs = utils.RandomCropWithBbox(img, proposals, gt_bboxs)
 
+            num_pps = min(proposals.shape[0], self.max_proposal)
+            pad_proposals[:num_pps] = proposals[:num_pps]
+        else:
+            num_pps = min(gt_boxes.shape[0], self.max_proposal)
+            pad_proposals[:num_pps] = np.concatenate((gt_boxes[:num_pps], np.ones([num_pps, 1])), axis=1)
+
+        return pad_proposals
+
+    def _forward(self, img, seq, ppls, gt_boxes, mask_boxes, num):
+        # firstly, use the faster-rcnn extract the bounding boxes
+        # ppls = self.extract_proposals(img, gt_boxes, self.ppls_threshold)
         seq = seq.view(-1, seq.size(2), seq.size(3))
         seq_update = seq.data.clone()
 

@@ -3,7 +3,6 @@ from __future__ import absolute_import, division, print_function
 import copy
 import json
 import os
-import pdb
 import random
 
 import numpy as np
@@ -20,6 +19,7 @@ from pycocotools.coco import COCO
 import copy
 
 from .dataloader_hdf import HDFSingleDataset
+from .dataloader_json import JSONSingleDataset
 
 
 class DataLoader(data.Dataset):
@@ -109,7 +109,10 @@ class DataLoader(data.Dataset):
         self.caption_file = json.load(open(self.opt.input_json))
 
         # open the detection json file.
-        self.dataloader_hdf = HDFSingleDataset(self.opt.proposal_h5)
+        if self.opt.proposal_h5.endswith('json'):
+            self.dataloader_ppls = JSONSingleDataset(self.opt.proposal_h5)
+        else:
+            self.dataloader_ppls = HDFSingleDataset(self.opt.proposal_h5)
 
         # load the coco grounding truth bounding box.
         det_train_path = '%s/coco/annotations/instances_train2014.json' %(opt.data_path)
@@ -192,12 +195,22 @@ class DataLoader(data.Dataset):
         # load image here.
         image_id = self.info['images'][ix]['id']
         file_path = self.info['images'][ix]['file_path']
+        #
+        # import pdb
+        # pdb.set_trace()
 
-        proposal_item =copy.deepcopy(self.dataloader_hdf[ix])
-        num_proposal = int(proposal_item['dets_num'])
-        num_nms = int(proposal_item['nms_num'])
-        proposals = proposal_item['dets_labels']
-        proposals = proposals.squeeze()[:num_nms, :]
+        if self.opt.proposal_h5.endswith('json'):
+            proposal_item = copy.deepcopy(self.dataloader_ppls[image_id])
+            num_proposal = int(np.array(proposal_item['dets_num']))
+            num_nms = int(np.array(proposal_item['nms_num']))
+            proposals = np.array(proposal_item['dets_labels'])
+            proposals = proposals.squeeze()[:num_nms, :]
+        else:
+            proposal_item =copy.deepcopy(self.dataloader_ppls[ix])
+            num_proposal = int(proposal_item['dets_num'])
+            num_nms = int(proposal_item['nms_num'])
+            proposals = proposal_item['dets_labels']
+            proposals = proposals.squeeze()[:num_nms, :]
 
         coco_split = file_path.split('/')[0]
         # get the ground truth bounding box.
@@ -234,6 +247,7 @@ class DataLoader(data.Dataset):
             gt_bboxs = utils.resize_bbox(gt_bboxs, width, height, self.opt.image_crop_size, self.opt.image_crop_size)
 
         # crop the image and the bounding box.
+        # For fitting the Faster-RCNN, delete the crop operation
         img, proposals, gt_bboxs = self.RandomCropWithBbox(img, proposals, gt_bboxs)
 
         gt_x = (gt_bboxs[:,2]-gt_bboxs[:,0]+1)
@@ -302,38 +316,6 @@ class DataLoader(data.Dataset):
         gt_seq = np.zeros([10, self.seq_length])
         gt_seq[:ncap,:] = cap_seq[:,:,4]
 
-        # if self.split == 'train':
-            # augment the proposal with the gt bounding box.
-            # this is just to make sure there exist proposals which labels to 1.
-            # gt_bboxs_tmp = np.concatenate((gt_bboxs, np.ones((gt_bboxs.shape[0],1))), axis=1)
-            # proposals = np.concatenate((gt_bboxs_tmp, proposals), axis=0)
-        # flag = False
-        # for cap in captions:
-        #     if 'bus' in cap:
-        #         flag = True
-        # if flag:
-        #     img_show = np.array(img)
-        #     img_show2 = copy.deepcopy(img_show)
-        #     import cv2
-        #     for i in range(gt_bboxs.shape[0]):
-        #         class_name = self.itoc[int(gt_bboxs[i, 4])]
-        #         bbox = tuple(int(np.round(x)) for x in gt_bboxs[i, :4])
-        #         cv2.rectangle(img_show, bbox[0:2], bbox[2:4], (0, 204, 0), 2)
-        #         cv2.putText(img_show, '%s: %.3f' % (class_name, 1), (bbox[0], bbox[1] + 15), cv2.FONT_HERSHEY_PLAIN,
-        #                     1.0, (0, 0, 255), thickness=1)
-        #     cv2.imwrite('gt_boxes.jpg', img_show)
-
-        #     for i in range(proposals.shape[0]):
-        #         bbox = tuple(int(np.round(x)) for x in proposals[i, :4])
-        #         score =  proposals[i, 5]
-        #         class_name = self.itoc[int(proposals[i, 4])]
-        #         cv2.rectangle(img_show2, bbox[0:2], bbox[2:4], (0, 204, 0), 2)
-
-        #         cv2.putText(img_show2, '%s: %.3f' % (class_name, score), (bbox[0], bbox[1] + 15), cv2.FONT_HERSHEY_PLAIN,
-        #                     1.0, (0, 0, 255), thickness=1)
-        #     cv2.imwrite('proposals.jpg', img_show2)
-
-        #     pdb.set_trace()
         # padding the proposals and gt_bboxs
         pad_proposals = np.zeros((self.max_proposal, 6))
         pad_gt_bboxs = np.zeros((self.max_gt_box, 5))
