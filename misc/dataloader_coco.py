@@ -108,18 +108,19 @@ class DataLoader(data.Dataset):
         print('DataLoader loading json file: ', opt.input_json)
         self.caption_file = json.load(open(self.opt.input_json))
 
-        # open the detection json file.
-        if self.opt.proposal_h5.endswith('json'):
-            self.dataloader_ppls = JSONSingleDataset(self.opt.proposal_h5)
-        else:
-            self.dataloader_ppls = HDFSingleDataset(self.opt.proposal_h5)
-
         # load the coco grounding truth bounding box.
         det_train_path = '%s/coco/annotations/instances_train2014.json' %(opt.data_path)
         det_val_path = '%s/coco/annotations/instances_val2014.json' %(opt.data_path)
 
         self.coco_train = COCO(det_train_path)
         self.coco_val = COCO(det_val_path)
+
+        # open the detection json file.
+        if self.opt.proposal_h5.endswith('json'):
+            self.dataloader_ppls = JSONSingleDataset(self.opt.proposal_h5, coco=self.coco_train)
+        else:
+            self.dataloader_ppls = HDFSingleDataset(self.opt.proposal_h5)
+
 
         # category id to labels. +1 becuase 0 is the background label.
         self.ctol = {c:i+1 for i, c in enumerate(self.coco_val.cats.keys())}
@@ -175,6 +176,7 @@ class DataLoader(data.Dataset):
             stem_caption.append(tmp)
             indicator.append([(0, 0, 0)]*len(s)) # category class, binary class, fine-grain class.
 
+        # 放置两个list，其中一个针对ngram为2的，另一个针对ngram为1的 所对应的detecter获取的物体信息
         ngram_indicator = {i+1:copy.deepcopy(indicator) for i in range(ngram)}
         # get the 2 gram of the caption.
         for n in range(ngram,0,-1):
@@ -198,13 +200,22 @@ class DataLoader(data.Dataset):
         #
         # import pdb
         # pdb.set_trace()
+        coco_split = file_path.split('/')[0]
+        # get the ground truth bounding box.
+        if coco_split == 'train2014':
+            coco = self.coco_train
+        else:
+            coco = self.coco_val
 
         if self.opt.proposal_h5.endswith('json'):
             proposal_item = copy.deepcopy(self.dataloader_ppls[image_id])
             num_proposal = int(np.array(proposal_item['dets_num']))
             num_nms = int(np.array(proposal_item['nms_num']))
             proposals = np.array(proposal_item['dets_labels'])
-            proposals = proposals.squeeze()[:num_nms, :]
+            if len(proposals) != 0:
+                proposals = proposals[:num_nms, :]
+            else:
+                proposals = np.asarray([[]]).reshape((0, 6))
         else:
             proposal_item =copy.deepcopy(self.dataloader_ppls[ix])
             num_proposal = int(proposal_item['dets_num'])
@@ -212,12 +223,6 @@ class DataLoader(data.Dataset):
             proposals = proposal_item['dets_labels']
             proposals = proposals.squeeze()[:num_nms, :]
 
-        coco_split = file_path.split('/')[0]
-        # get the ground truth bounding box.
-        if coco_split == 'train2014':
-            coco = self.coco_train
-        else:
-            coco = self.coco_val
 
         bbox_ann_ids = coco.getAnnIds(imgIds=image_id)
         bbox_ann = [{'label': self.ctol[i['category_id']], 'bbox': i['bbox']} for i in coco.loadAnns(bbox_ann_ids)]

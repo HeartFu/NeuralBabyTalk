@@ -485,6 +485,7 @@ def resize_bbox(bbox, width, height, rwidth, rheight):
     width_ratio = rwidth / float(width)
     height_ratio = rheight / float(height)
 
+    # if len(bbox) != 0:
     bbox[:,0] = bbox[:,0] * width_ratio
     bbox[:,2] = bbox[:,2] * width_ratio
     bbox[:,1] = bbox[:,1] * height_ratio

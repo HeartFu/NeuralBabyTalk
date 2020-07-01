@@ -13,7 +13,7 @@ def parse_opt():
                     help='path to the json containing the preprocessed dataset')
     parser.add_argument('--image_path', type=str, default='/srv/share/datasets/coco/images',
                     help='path to the h5file containing the image data') 
-    parser.add_argument('--proposal_h5', type=str, default='data/coco/coco_detection.h5',
+    parser.add_argument('--proposal_h5', type=str, default='data/coco/detector.json',
                     help='path to the json containing the detection result.') 
     parser.add_argument('--cnn_backend', type=str, default='res101',
                     help='res101 or vgg16') 

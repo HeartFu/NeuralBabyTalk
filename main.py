@@ -61,6 +61,7 @@ def train(epoch, opt):
     for step, data in enumerate(progress_bar):
         count += 1
         img, iseq, gts_seq, num, proposals, bboxs, box_mask, img_id = data
+        # print("images ids: {}".format(img_id))
         proposals = proposals[:, :max(int(max(num[:, 1])), 1), :]
         bboxs = bboxs[:, :int(max(num[:, 2])), :]
         box_mask = box_mask[:, :, :max(int(max(num[:, 2])), 1), :]
@@ -257,8 +258,8 @@ def train(epoch, opt):
 # Main
 ####################################################################################
 # initialize the data holder.
-
-# python main.py --path_opt cfgs/normal_coco_res101.yml --batch_size 20 --cuda True --num_workers 4 --max_epoch 50
+#python main.py --path_opt cfgs/normal_coco_res101.yml --batch_size 20 --cuda True --num_workers 4 --max_epoch 50 --proposal_h5 detector.json --mGPUs True
+# python main.py --path_opt cfgs/normal_coco_res101.yml --batch_size 20 --cuda True --num_workers 4 --max_epoch 50 --proposal_h5 detector.json --mGPUs True
 if __name__ == '__main__':
     wandb.init(project="test")
     opt = opts.parse_opt()
@@ -268,7 +269,7 @@ if __name__ == '__main__':
         utils.update_values(options_yaml, vars(opt))
     print(opt)
     cudnn.benchmark = True
-
+    # print(opt.proposal_h5)
     if opt.dataset == 'flickr30k':
         from misc.dataloader_flickr30k import DataLoader
     else:

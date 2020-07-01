@@ -224,17 +224,19 @@ class AttModel(CaptionModel):
         rois[:, :, 1:] = ppls.data[:, :, :4]
 
         for i in range(batch_size): rois[i, :, 0] = i
+
+        # Map the proposals to feature maps which are from ResNet
         pool_feats = self.roi_align(conv_feats, Variable(rois.view(-1, 5)))
         pool_feats = pool_feats.view(batch_size, rois_num, self.att_feat_size)
 
         loc_input = ppls.data.new(batch_size, rois_num, 5)
         loc_input[:, :, :4] = ppls.data[:, :, :4] / self.image_crop_size
-        loc_input[:, :, 4] = ppls.data[:, :, 5]
-        loc_feats = self.loc_fc(Variable(loc_input))
+        loc_input[:, :, 4] = ppls.data[:, :, 5] # Batch * num_proposals * 5   5 is (coordinate + score)
+        loc_feats = self.loc_fc(Variable(loc_input)) # proposal + scores features
 
         label_input = seq.data.new(batch_size, rois_num)
         label_input[:, :] = ppls.data[:, :, 4]
-        label_feat = self.det_fc(Variable(label_input))
+        label_feat = self.det_fc(Variable(label_input)) # labels of proposals features
 
         # pool_feats = pool_feats + label_feat
         pool_feats = torch.cat((pool_feats, loc_feats, label_feat), 2)
@@ -303,8 +305,8 @@ class AttModel(CaptionModel):
         det_output = torch.cat([_.unsqueeze(1) for _ in det_output], 1)
         roi_labels = torch.cat([_.unsqueeze(1) for _ in roi_labels], 1)
 
-        det_output = F.log_softmax(det_output, dim=2)
-        decoded = F.log_softmax(self.beta * self.logit(rnn_output), dim=2)
+        det_output = F.log_softmax(det_output, dim=2) # RNN output for Detection probability
+        decoded = F.log_softmax(self.beta * self.logit(rnn_output), dim=2) # RNN output with vocabulary size
         lambda_v = det_output[:, :, 0].contiguous()
         prob_det = det_output[:, :, 1:].contiguous()
 
