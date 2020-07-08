@@ -13,6 +13,7 @@ import pdb
 
 
 class Attention(nn.Module):
+    # the implement of formula 14 for cnn features
     def __init__(self, opt):
         super(Attention, self).__init__()
         self.rnn_size = opt.rnn_size
@@ -26,7 +27,7 @@ class Attention(nn.Module):
     def forward(self, h, att_feats, p_att_feats):
         # The p_att_feats here is already projected
         batch_size = h.size(0)
-        att_size = att_feats.numel() // batch_size // self.rnn_size
+        att_size = att_feats.numel() // batch_size // self.rnn_size  # numel() is the number of parameter.
         att = p_att_feats.view(-1, att_size, self.att_hid_size)
 
         att_h = self.h2att(h)  # batch * att_hid_size
@@ -49,6 +50,7 @@ class Attention(nn.Module):
 
 
 class Attention2(nn.Module):
+    # the implement of formula 14 for detection visual feature
     def __init__(self, opt):
         super(Attention2, self).__init__()
         self.rnn_size = opt.rnn_size
@@ -87,6 +89,7 @@ class Attention2(nn.Module):
         return att_res
 
 
+# Adaptive model for visual sentinel
 class adaPnt(nn.Module):
     def __init__(self, conv_size, rnn_size, att_hid_size, dropout, min_value, beta):
         super(adaPnt, self).__init__()
@@ -160,12 +163,13 @@ class TopDownCore(nn.Module):
 
         # FF: modify warning, change F.sigmoid to torch.sigmoid
         ada_gate_point = torch.sigmoid(self.i2h_2(lang_lstm_input) + self.h2h_2(state[0][1]))
+        # FF: modify warning, change F.tanh to torch.tanh
+        fake_box = F.dropout(ada_gate_point * torch.tanh(state[1][1]), self.drop_prob_lm,
+                             training=self.training)  # St, visual sentinel
+        # fake_box = F.dropout(ada_gate_point*F.tanh(state[1][1]), self.drop_prob_lm, training=self.training)
         # ada_gate_point = F.sigmoid(self.i2h_2(lang_lstm_input) + self.h2h_2(state[0][1]))
         h_lang, c_lang = self.lang_lstm(lang_lstm_input, (state[0][1], state[1][1]))
         output = F.dropout(h_lang, self.drop_prob_lm, self.training)
-        # FF: modify warning, change F.tanh to torch.tanh
-        fake_box = F.dropout(ada_gate_point * torch.tanh(state[1][1]), self.drop_prob_lm, training=self.training)
-        # fake_box = F.dropout(ada_gate_point*F.tanh(state[1][1]), self.drop_prob_lm, training=self.training)
         det_prob = self.adaPnt(output, fake_box, pool_feats, p_pool_feats, pnt_mask)
         state = (torch.stack([h_att, h_lang]), torch.stack([c_att, c_lang]))
         return output, det_prob, state
@@ -245,7 +249,7 @@ class Att2in2Model(AttModel):
         self.core = Att2in2Core(opt)
         self.ccr_core = CascadeCore(opt)
 
-
+# Fine-granded visual words, like singular or plural
 class CascadeCore(nn.Module):
     def __init__(self, opt):
         super(CascadeCore, self).__init__()

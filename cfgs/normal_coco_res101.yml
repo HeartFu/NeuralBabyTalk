@@ -4,8 +4,8 @@ input_json: 'data/coco/cap_coco.json'
 input_dic: 'data/coco/dic_coco.json'
 #image_path: 'data/coco/images'
 image_path: '/home/fanfu/newdisk/dataset/coco/2014'
-proposal_h5: 'data/coco/detector.json'
-#proposal_h5: 'data/coco/coco_detection.h5'
+#proposal_h5: 'data/coco/detector.json'
+proposal_h5: 'data/coco/coco_detection.h5'
 data_path: 'data'
 # language model
 cnn_backend: res101

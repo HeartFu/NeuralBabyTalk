@@ -189,8 +189,6 @@ class AttModel(CaptionModel):
         return pad_proposals
 
     def _forward(self, img, seq, ppls, gt_boxes, mask_boxes, num):
-        # firstly, use the faster-rcnn extract the bounding boxes
-        # ppls = self.extract_proposals(img, gt_boxes, self.ppls_threshold)
         seq = seq.view(-1, seq.size(2), seq.size(3))
         seq_update = seq.data.clone()
 
@@ -231,12 +229,12 @@ class AttModel(CaptionModel):
 
         loc_input = ppls.data.new(batch_size, rois_num, 5)
         loc_input[:, :, :4] = ppls.data[:, :, :4] / self.image_crop_size
-        loc_input[:, :, 4] = ppls.data[:, :, 5] # Batch * num_proposals * 5   5 is (coordinate + score)
-        loc_feats = self.loc_fc(Variable(loc_input)) # proposal + scores features
+        loc_input[:, :, 4] = ppls.data[:, :, 5]  # Batch * num_proposals * 5   5 is (coordinate + score)
+        loc_feats = self.loc_fc(Variable(loc_input))  # proposal + scores features
 
         label_input = seq.data.new(batch_size, rois_num)
         label_input[:, :] = ppls.data[:, :, 4]
-        label_feat = self.det_fc(Variable(label_input)) # labels of proposals features
+        label_feat = self.det_fc(Variable(label_input))  # labels of proposals features
 
         # pool_feats = pool_feats + label_feat
         pool_feats = torch.cat((pool_feats, loc_feats, label_feat), 2)
@@ -262,8 +260,8 @@ class AttModel(CaptionModel):
         pool_feats = self.pool_embed(pool_feats)
 
         # Project the attention feats first to reduce memory and computation comsumptions.
-        p_conv_feats = self.ctx2att(conv_feats)
-        p_pool_feats = self.ctx2pool(pool_feats)
+        p_conv_feats = self.ctx2att(conv_feats)  # (B * attention hidden size)
+        p_pool_feats = self.ctx2pool(pool_feats)  # (B * attention hidden size)
 
         # calculate the overlaps between the rois and gt_bbox.
         overlaps = utils.bbox_overlaps(ppls.data, gt_boxes.data)
@@ -305,8 +303,8 @@ class AttModel(CaptionModel):
         det_output = torch.cat([_.unsqueeze(1) for _ in det_output], 1)
         roi_labels = torch.cat([_.unsqueeze(1) for _ in roi_labels], 1)
 
-        det_output = F.log_softmax(det_output, dim=2) # RNN output for Detection probability
-        decoded = F.log_softmax(self.beta * self.logit(rnn_output), dim=2) # RNN output with vocabulary size
+        det_output = F.log_softmax(det_output, dim=2)  # RNN output for Detection probability
+        decoded = F.log_softmax(self.beta * self.logit(rnn_output), dim=2)  # RNN output with vocabulary size
         lambda_v = det_output[:, :, 0].contiguous()
         prob_det = det_output[:, :, 1:].contiguous()
 
@@ -329,6 +327,7 @@ class AttModel(CaptionModel):
         vis_idx = Variable(vis_idx.view(-1))
 
         # roi_labels = Variable(roi_labels)
+        # bn represent formular 11; fg represent formular 12.
         bn_logprob, fg_logprob = self.ccr_core(vis_idx, pool_feats, rnn_output, roi_labels, seq_batch_size, seq_cnt)
 
         bn_loss = self.critBN(bn_logprob, seq_update[:, 1:seq_cnt + 1, 1].clone())

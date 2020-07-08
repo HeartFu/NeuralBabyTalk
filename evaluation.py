@@ -21,7 +21,7 @@ if __name__ == '__main__':
         with open(opt.path_opt, 'r') as handle:
             options_yaml = yaml.load(handle, Loader=yaml.FullLoader)
         utils.update_values(options_yaml, vars(opt))
-
+    print(opt)
     cudnn.benchmark = True
 
     if opt.dataset == 'flickr30k':
