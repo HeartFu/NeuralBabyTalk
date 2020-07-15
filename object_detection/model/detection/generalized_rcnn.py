@@ -41,7 +41,7 @@ class GeneralizedRCNN(nn.Module):
         return detections
 
     def forward(self, images, targets=None):
-        # type: (List[Tensor], Optional[List[Dict[str, Tensor]]]) -> Tuple[Dict[str, Tensor], List[Dict[str, Tensor]]]
+        # type: (List[Tensor], Optional[List[Dict[str, Tensor]]]) -> Tuple[Any, Tuple[dict, Any]]
         """
         Arguments:
             images (list[Tensor]): images to be processed
@@ -89,7 +89,7 @@ class GeneralizedRCNN(nn.Module):
                                      " Found invaid box {} for target at index {}."
                                      .format(degen_bb, target_idx))
 
-        features = self.backbone(images.tensors)
+        features, conv_features = self.backbone(images.tensors)
         if isinstance(features, torch.Tensor):
             features = OrderedDict([('0', features)])
         proposals, proposal_losses = self.rpn(images, features, targets)
@@ -104,6 +104,6 @@ class GeneralizedRCNN(nn.Module):
             if not self._has_warned:
                 warnings.warn("RCNN always returns a (Losses, Detections) tuple in scripting")
                 self._has_warned = True
-            return (losses, detections)
+            return conv_features[len(conv_features) - 1], (losses, detections)
         else:
-            return self.eager_outputs(losses, detections)
+            return conv_features[len(conv_features) - 1], self.eager_outputs(losses, detections)

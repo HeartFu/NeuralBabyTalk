@@ -37,8 +37,8 @@ class BackboneWithFPN(nn.Module):
 
     def forward(self, x):
         x = self.body(x)
-        x = self.fpn(x)
-        return x
+        fpn_feature = self.fpn(x)
+        return fpn_feature, x
 
 
 def resnet_fpn_backbone(backbone_name, pretrained, norm_layer=misc_nn_ops.FrozenBatchNorm2d, trainable_layers=3):

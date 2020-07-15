@@ -14,7 +14,7 @@ from eval_tools import eval_NBT
 from misc import utils, AttModel
 import yaml
 
-# python evaluation.py --path_opt cfgs/normal_coco_res101.yml --batch_size 20 --cuda True --num_workers 4 --max_epoch 30 --beam_size 3 --start_from save/normal_coco_1024
+# python evaluation.py --path_opt cfgs/normal_coco_res101.yml --batch_size 20 --cuda True --num_workers 4 --max_epoch 30 --beam_size 3 --start_from save/batchsize100
 if __name__ == '__main__':
     opt = opts.parse_opt()
     if opt.path_opt is not None:
