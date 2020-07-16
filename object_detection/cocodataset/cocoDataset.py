@@ -7,7 +7,7 @@ from PIL import Image
 from torch.utils import data as data
 from pycocotools.coco import COCO
 import torchvision.transforms as transforms
-from misc import utils
+# from misc import utils
 
 
 class COCODataset(data.Dataset):
@@ -37,6 +37,23 @@ class COCODataset(data.Dataset):
         self.Resize = transforms.Resize((self.image_size, self.image_size))
         self.ToTensor = transforms.ToTensor()
         self.res_Normalize = transforms.Normalize([0.485, 0.456, 0.406], [0.229, 0.224, 0.225])
+        # self.transform = transform
+
+    def resize_bbox(self, bbox, width, height, rwidth, rheight):
+        """
+        resize the bbox from height width to rheight rwidth
+        bbox: x,y,width, height.
+        """
+        width_ratio = rwidth / float(width)
+        height_ratio = rheight / float(height)
+
+        # if len(bbox) != 0:
+        bbox[:, 0] = bbox[:, 0] * width_ratio
+        bbox[:, 2] = bbox[:, 2] * width_ratio
+        bbox[:, 1] = bbox[:, 1] * height_ratio
+        bbox[:, 3] = bbox[:, 3] * height_ratio
+
+        return bbox
 
     def __getitem__(self, index):
         ix = self.split_ix[index]
@@ -59,10 +76,10 @@ class COCODataset(data.Dataset):
         bbox_ann = [{'label': i['category_id'], 'bbox': i['bbox']} for i in coco.loadAnns(bbox_ann_ids)]
 
         gt_bboxs = np.zeros((len(bbox_ann), 4))
-        gt_targets = np.zeros((len(bbox_ann), 4))
+        gt_targets = np.zeros((len(bbox_ann)))
         for i, bbox in enumerate(bbox_ann):
             gt_bboxs[i, :4] = bbox['bbox']
-            gt_targets[i, 0] = bbox['label']
+            gt_targets[i] = bbox['label']
 
         # convert from x,y,w,h to x_min, y_min, x_max, y_max
         gt_bboxs[:, 2] = gt_bboxs[:, 2] + gt_bboxs[:, 0]
@@ -75,16 +92,16 @@ class COCODataset(data.Dataset):
         # resize the image.
         img = self.Resize(img)
 
-        gt_bboxs = utils.resize_bbox(gt_bboxs, width, height, self.image_size, self.image_size)
+        gt_bboxs = self.resize_bbox(gt_bboxs, width, height, self.image_size, self.image_size)
 
         img = self.ToTensor(img)
         img = self.res_Normalize(img)
 
         targets={}
-        targets['labels'] = gt_targets
-        targets['bboxs'] = gt_bboxs
-        targets['image_id'] = image_id
-        targets = torch.tensor(targets)
+        targets['labels'] = torch.tensor(gt_targets, dtype=torch.int64)
+        targets['boxes'] = torch.tensor(gt_bboxs)
+        targets['image_id'] = torch.tensor(image_id)
+        # targets = torch.tensor(targets)
         return img, targets
 
     def __len__(self):

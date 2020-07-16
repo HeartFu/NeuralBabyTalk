@@ -7,8 +7,8 @@ from torch import Tensor
 from torchvision.ops import boxes as box_ops
 
 from torchvision.ops import roi_align
-
-from model.detection import _utils as det_utils
+from object_detection.model.detection import _utils as det_utils
+# from model.detection import _utils as det_utils
 
 from torch.jit.annotations import Optional, List, Dict, Tuple
 
@@ -594,11 +594,15 @@ class RoIHeads(torch.nn.Module):
 
     def subsample(self, labels):
         # type: (List[Tensor]) -> List[Tensor]
-        sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels)
+        # import pdb
+        # pdb.set_trace()
+        sampled_pos_inds, sampled_neg_inds = self.fg_bg_sampler(labels, flag=0)
         sampled_inds = []
         for img_idx, (pos_inds_img, neg_inds_img) in enumerate(
             zip(sampled_pos_inds, sampled_neg_inds)
         ):
+            # import pdb
+            # pdb.set_trace()
             img_sampled_inds = torch.nonzero(pos_inds_img | neg_inds_img).squeeze(1)
             sampled_inds.append(img_sampled_inds)
         return sampled_inds

@@ -104,6 +104,6 @@ class GeneralizedRCNN(nn.Module):
             if not self._has_warned:
                 warnings.warn("RCNN always returns a (Losses, Detections) tuple in scripting")
                 self._has_warned = True
-            return conv_features[len(conv_features) - 1], (losses, detections)
+            return conv_features['3'], (losses, detections)
         else:
-            return conv_features[len(conv_features) - 1], self.eager_outputs(losses, detections)
+            return conv_features['3'], self.eager_outputs(losses, detections)

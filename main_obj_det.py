@@ -12,6 +12,8 @@ from object_detection.model.detection.faster_rcnn import fasterrcnn_resnet101_fp
 import object_detection.opts as opts
 
 
+# import wandb
+
 def collate_fn(batch):
     return tuple(zip(*batch))
 
@@ -29,7 +31,7 @@ def trainer(opts):
     train_dataset = COCODataset(opts.image_path, opts.ann_path,
                                 opts.split_json_input, opts.image_size, split='train')
     train_dataloader = data.DataLoader(train_dataset, batch_size=opts.batch_size,
-                                       shuffle=False, num_workers=opts.num_workers, collate_fn=collate_fn)
+                                       shuffle=True, num_workers=opts.num_workers, collate_fn=collate_fn)
 
     val_dataset = COCODataset(opts.image_path, opts.ann_path,
                               opts.split_json_input, opts.image_size, split='val')
@@ -37,7 +39,7 @@ def trainer(opts):
                                      shuffle=False, num_workers=opts.num_workers, collate_fn=collate_fn)
 
     # build the model
-    model = fasterrcnn_resnet101_fpn(pretrained=False)
+    model = fasterrcnn_resnet101_fpn(pretrained=False, trainable_backbone_layers=0)
     print("model structure: {}".format(model))
     infos = {}
     # optimizer
@@ -45,9 +47,10 @@ def trainer(opts):
     lr = opts.lr
     for key, value in dict(model.named_parameters()).items():
         if value.requires_grad:
+            print(key)
             if 'bias' in key:
                 params += [{'params': [value], 'lr': opts.lr * (opts.TRAIN_DOUBLE_BIAS + 1),
-                            'weight_decay': opts.TRAIN.BIAS_DECAY and opts.TRAIN_WEIGHT_DECAY or 0}]
+                            'weight_decay': opts.TRAIN_BIAS_DECAY and opts.TRAIN_WEIGHT_DECAY or 0}]
             else:
                 params += [{'params': [value], 'lr': opts.lr, 'weight_decay': opts.TRAIN_WEIGHT_DECAY}]
 
@@ -67,7 +70,7 @@ def trainer(opts):
     map_list = []
     lr_list = []
     best_val_result = 0
-    for epoch in range(opts.epoch):
+    for epoch in range(opts.epochs):
         model.train()
         loss_temp = 0
         # start = time.time()
@@ -80,28 +83,44 @@ def trainer(opts):
         progress_bar = tqdm(train_dataloader, desc='|Train Epoch {}'.format(epoch), leave=False)
         for step, batch in enumerate(progress_bar):
             imgs, targets = batch
+            image_list = []
+            target_list = []
+            for i in range(0, len(targets)):
+                # delete some empty data
+                if bool(targets[i]['labels'].numel()) and bool(targets[i]['boxes'].numel()):
+                    target_list.append(targets[i])
+                    image_list.append(imgs[i])
+                else:
+                    continue
+            target_tuple = tuple(target_list)
+            image_tuple = tuple(image_list)
+            if len(target_tuple) > 0:
+                if opts.cuda:
+                    image_list = list(image.cuda() for image in image_tuple)
+                    target_list = [{k: v.cuda() for k, v in t.items()} for t in target_tuple]
+                # if opts.cuda:
+                #     imgs.cuda()
+                #     targets.cuda()
 
-            if opts.cuda:
-                imgs.cuda()
-                targets.cuda()
+                model.zero_grad()
+                # import pdb
+                # pdb.set_trace()
+                _, loss = model(image_list, target_list)
 
-            model.zero_grad()
-
-            _, loss = model(imgs, targets)
-
-            total_loss = 0
-            for k in loss.keys():
-                total_loss += loss[k].mean()
-            loss_temp += total_loss.item()
-            total_loss.backward()
-            optimizer.step()
-
-            description = {
-                k: value for k, value in loss
-            }
-            description['total_loss'] = total_loss.item()
-            progress_bar.set_postfix(description,
-                                     refresh=True)
+                total_loss = 0
+                for k in loss.keys():
+                    total_loss += loss[k].mean()
+                loss_temp += total_loss.item()
+                total_loss.backward()
+                optimizer.step()
+                description = {
+                    k: loss[k].item() for k in loss.keys()
+                }
+                description['total_loss'] = total_loss.item()
+                # description['id'] = target_list[0]['image_id']
+                # wandb.log(description)
+                progress_bar.set_postfix(description,
+                                         refresh=True)
         result = None
         if (epoch + 1) % opts.val_every_epoch == 0:
             # evaluation, use pascal voc evaluation method, for COCO evaluation, It is used after training
@@ -132,7 +151,9 @@ def trainer(opts):
                 gt_bboxes, gt_labels, None, iou_thresh=0.5,
                 use_07_metric=False
             )
-
+            # wandb.log({
+            #     'map': result['map']
+            # })
             model.train()
 
         if result is not None:
@@ -145,8 +166,10 @@ def trainer(opts):
             checkpoint_path = os.path.join(opts.checkpoint_path, 'model-best.pth')
             if opts.mGPUs:
                 torch.save(model.module.state_dict(), checkpoint_path)
+                # torch.save(model.module.state_dict(), os.path.join(wandb.run.dir, 'model-best.pth'))
             else:
                 torch.save(model.state_dict(), checkpoint_path)
+                # torch.save(model.state_dict(), os.path.join(wandb.run.dir, 'model-best.pth'))
             print("model saved to {} with best map score {:.3f}".format(checkpoint_path, best_val_result))
         print("Train processing, Epoch: {}, loss: {}, validation_map: {}".format(epoch, loss_temp, map))
         loss_list.append(loss_temp)
@@ -166,11 +189,16 @@ def trainer(opts):
     checkpoint_path = os.path.join(opts.checkpoint_path, 'model.pth')
     if opts.mGPUs:
         torch.save(model.module.state_dict(), checkpoint_path)
+        # torch.save(model.module.state_dict(), os.path.join(wandb.run.dir, 'model.pth'))
     else:
         torch.save(model.state_dict(), checkpoint_path)
+        # torch.save(model.state_dict(), os.path.join(wandb.run.dir, 'model.pth'))
 
 
+# python main_obj_det.py --image_path /import/nobackup_mmv_ioannisp/shared/datasets/coco2014/images --batch_size 64 --num_workers 10 --mGPUs True
 if __name__ == '__main__':
     opts = opts.parse_opt()
+    print(opts)
     cudnn.benchmark = True
+    # wandb.init(project="fasterrcnn")
     trainer(opts)

@@ -21,7 +21,7 @@ class BalancedPositiveNegativeSampler(object):
         self.batch_size_per_image = batch_size_per_image
         self.positive_fraction = positive_fraction
 
-    def __call__(self, matched_idxs):
+    def __call__(self, matched_idxs, flag=1):
         # type: (List[Tensor]) -> Tuple[List[Tensor], List[Tensor]]
         """
         Arguments:
@@ -38,6 +38,11 @@ class BalancedPositiveNegativeSampler(object):
         """
         pos_idx = []
         neg_idx = []
+        # if flag == 0:
+        #     import pdb
+        #     pdb.set_trace()
+        # import pdb
+        # pdb.set_trace()
         for matched_idxs_per_image in matched_idxs:
             positive = torch.nonzero(matched_idxs_per_image >= 1).squeeze(1)
             negative = torch.nonzero(matched_idxs_per_image == 0).squeeze(1)

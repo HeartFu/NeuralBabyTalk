@@ -330,7 +330,9 @@ class RegionProposalNetwork(torch.nn.Module):
                 matched_gt_boxes_per_image = torch.zeros(anchors_per_image.shape, dtype=torch.float32, device=device)
                 labels_per_image = torch.zeros((anchors_per_image.shape[0],), dtype=torch.float32, device=device)
             else:
-                match_quality_matrix = box_ops.box_iou(gt_boxes, anchors_per_image)
+                # import pdb
+                # pdb.set_trace()
+                match_quality_matrix = box_ops.box_iou(gt_boxes, anchors_per_image.double())
                 matched_idxs = self.proposal_matcher(match_quality_matrix)
                 # get the targets corresponding GT for each proposal
                 # NB: need to clamp the indices because we can have a single
