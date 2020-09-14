@@ -9,7 +9,7 @@ from torch.utils import data
 from tqdm import tqdm
 
 from .COCODataset import COCODataset
-from .model.detection.faster_rcnn import fasterrcnn_resnet50_fpn
+from object_detection.model.detection.faster_rcnn import fasterrcnn_resnet50_fpn
 from torchvision import transforms
 
 
