@@ -7,7 +7,7 @@ from torch import Tensor
 from torchvision.ops import boxes as box_ops
 
 from torchvision.ops import roi_align
-from object_detection.model.detection import _utils as det_utils
+from model.detection import _utils as det_utils
 # from model.detection import _utils as det_utils
 
 from torch.jit.annotations import Optional, List, Dict, Tuple
@@ -748,8 +748,8 @@ class RoIHeads(torch.nn.Module):
             regression_targets = None
             matched_idxs = None
 
-        box_features = self.box_roi_pool(features, proposals, image_shapes)
-        box_features = self.box_head(box_features)
+        box_features, rois = self.box_roi_pool(features, proposals, image_shapes)
+        box_features = self.box_head(box_features, rois)
         class_logits, box_regression = self.box_predictor(box_features)
 
         result = torch.jit.annotate(List[Dict[str, torch.Tensor]], [])

@@ -4,9 +4,11 @@ import torch
 from torch import nn
 import torch.nn.functional as F
 
-from torchvision.ops import misc as misc_nn_ops
-from torchvision.ops import MultiScaleRoIAlign
+from torchvision.ops import misc as misc_nn_ops, roi_align
+# from torchvision.ops import MultiScaleRoIAlign
+from torchvision.ops.poolers import LevelMapper
 
+from .RelationNetwork import RelationNetwork
 from ..utils import load_state_dict_from_url
 
 from .generalized_rcnn import GeneralizedRCNN
@@ -132,7 +134,7 @@ class FasterRCNN(GeneralizedRCNN):
         >>> predictions = model(x)
     """
 
-    def __init__(self, backbone, num_classes=None,
+    def __init__(self, backbone, device, num_classes=None,
                  # transform parameters
                  min_size=800, max_size=1333,
                  image_mean=None, image_std=None,
@@ -199,6 +201,7 @@ class FasterRCNN(GeneralizedRCNN):
             resolution = box_roi_pool.output_size[0]
             representation_size = 1024
             box_head = TwoMLPHead(
+                device,
                 out_channels * resolution ** 2,
                 representation_size)
 
@@ -224,6 +227,133 @@ class FasterRCNN(GeneralizedRCNN):
 
         super(FasterRCNN, self).__init__(backbone, rpn, roi_heads, transform)
 
+class MultiScaleRoIAlign(nn.Module):
+    """
+    Multi-scale RoIAlign pooling, which is useful for detection with or without FPN.
+
+    It infers the scale of the pooling via the heuristics present in the FPN paper.
+
+    Arguments:
+        featmap_names (List[str]): the names of the feature maps that will be used
+            for the pooling.
+        output_size (List[Tuple[int, int]] or List[int]): output size for the pooled region
+        sampling_ratio (int): sampling ratio for ROIAlign
+
+    Examples::
+
+        >>> m = torchvision.ops.MultiScaleRoIAlign(['feat1', 'feat3'], 3, 2)
+        >>> i = OrderedDict()
+        >>> i['feat1'] = torch.rand(1, 5, 64, 64)
+        >>> i['feat2'] = torch.rand(1, 5, 32, 32)  # this feature won't be used in the pooling
+        >>> i['feat3'] = torch.rand(1, 5, 16, 16)
+        >>> # create some random bounding boxes
+        >>> boxes = torch.rand(6, 4) * 256; boxes[:, 2:] += boxes[:, :2]
+        >>> # original image size, before computing the feature maps
+        >>> image_sizes = [(512, 512)]
+        >>> output = m(i, [boxes], image_sizes)
+        >>> print(output.shape)
+        >>> torch.Size([6, 5, 3, 3])
+
+    """
+
+    def __init__(self, featmap_names, output_size, sampling_ratio):
+        super(MultiScaleRoIAlign, self).__init__()
+        if isinstance(output_size, int):
+            output_size = (output_size, output_size)
+        self.featmap_names = featmap_names
+        self.sampling_ratio = sampling_ratio
+        self.output_size = tuple(output_size)
+        self.scales = None
+        self.map_levels = None
+
+    def convert_to_roi_format(self, boxes):
+        concat_boxes = torch.cat(boxes, dim=0)
+        device, dtype = concat_boxes.device, concat_boxes.dtype
+        ids = torch.cat(
+            [
+                torch.full((len(b), 1), i, dtype=dtype, device=device)
+                for i, b in enumerate(boxes)
+            ],
+            dim=0,
+        )
+        rois = torch.cat([ids, concat_boxes], dim=1)
+        return rois
+
+    def infer_scale(self, feature, original_size):
+        # assumption: the scale is of the form 2 ** (-k), with k integer
+        size = feature.shape[-2:]
+        possible_scales = []
+        for s1, s2 in zip(size, original_size):
+            approx_scale = float(s1) / s2
+            scale = 2 ** torch.tensor(approx_scale).log2().round().item()
+            possible_scales.append(scale)
+        assert possible_scales[0] == possible_scales[1]
+        return possible_scales[0]
+
+    def setup_scales(self, features, image_shapes):
+        original_input_shape = tuple(max(s) for s in zip(*image_shapes))
+        scales = [self.infer_scale(feat, original_input_shape) for feat in features]
+        # get the levels in the feature map by leveraging the fact that the network always
+        # downsamples by a factor of 2 at each level.
+        lvl_min = -torch.log2(torch.tensor(scales[0], dtype=torch.float32)).item()
+        lvl_max = -torch.log2(torch.tensor(scales[-1], dtype=torch.float32)).item()
+        self.scales = scales
+        self.map_levels = LevelMapper(lvl_min, lvl_max)
+
+    def forward(self, x, boxes, image_shapes):
+        """
+        Arguments:
+            x (OrderedDict[Tensor]): feature maps for each level. They are assumed to have
+                all the same number of channels, but they can have different sizes.
+            boxes (List[Tensor[N, 4]]): boxes to be used to perform the pooling operation, in
+                (x1, y1, x2, y2) format and in the image reference size, not the feature map
+                reference.
+            image_shapes (List[Tuple[height, width]]): the sizes of each image before they
+                have been fed to a CNN to obtain feature maps. This allows us to infer the
+                scale factor for each one of the levels to be pooled.
+        Returns:
+            result (Tensor)
+        """
+        x = [v for k, v in x.items() if k in self.featmap_names]
+        num_levels = len(x)
+        # import pdb
+        # pdb.set_trace()
+        rois = self.convert_to_roi_format(boxes)
+        if self.scales is None:
+            self.setup_scales(x, image_shapes)
+
+        if num_levels == 1:
+            return roi_align(
+                x[0], rois,
+                output_size=self.output_size,
+                spatial_scale=self.scales[0],
+                sampling_ratio=self.sampling_ratio
+            )
+
+        levels = self.map_levels(boxes)
+
+        num_rois = len(rois)
+        num_channels = x[0].shape[1]
+
+        dtype, device = x[0].dtype, x[0].device
+        result = torch.zeros(
+            (num_rois, num_channels,) + self.output_size,
+            dtype=dtype,
+            device=device,
+        )
+
+        for level, (per_level_feature, scale) in enumerate(zip(x, self.scales)):
+            idx_in_level = torch.nonzero(levels == level).squeeze(1)
+            rois_per_level = rois[idx_in_level]
+
+            result[idx_in_level] = roi_align(
+                per_level_feature, rois_per_level,
+                output_size=self.output_size,
+                spatial_scale=scale, sampling_ratio=self.sampling_ratio
+            )
+        # return real rois with levels, [batch*512, 5], [level, xmin, ymin, xmax, ymax]
+        return result, rois
+
 
 class TwoMLPHead(nn.Module):
     """
@@ -233,19 +363,49 @@ class TwoMLPHead(nn.Module):
         representation_size (int): size of the intermediate representation
     """
 
-    def __init__(self, in_channels, representation_size):
+    def __init__(self, device, in_channels, representation_size, relation_layers_num=1):
         super(TwoMLPHead, self).__init__()
+        # relation_network_list = [] # for fully connected layer 1
+        # relation_network_list2 = [] # for fully connected layer 2
+        # for i in range(relation_layers_num):
+        #     relation_network_list.append(RelationNetwork(fc_dim=16, feat_dim=1024, dim=(1024,1024,1024), group=16, emb_dim=64, input_dim=1024).to(device))
+        # for i in range(relation_layers_num):
+        #     relation_network_list2.append(RelationNetwork(fc_dim=16, feat_dim=1024, dim=(1024,1024,1024), group=16, emb_dim=64, input_dim=1024).to(device))
+        # self.relation_network = RelationNetwork(fc_dim=16, feat_dim=1024, dim=(1024,1024,1024), group=16, emb_dim=64, input_dim=1024)
+        # self.relation_network_list = relation_network_list
+        # self.relation_network_list2 = relation_network_list2
+
+        self.attention_network1 = RelationNetwork(fc_dim=16, feat_dim=1024, dim=(1024,1024,1024), group=16, emb_dim=64, input_dim=1024)
+        self.attention_network2 = RelationNetwork(fc_dim=16, feat_dim=1024, dim=(1024,1024,1024), group=16, emb_dim=64, input_dim=1024)
 
         self.fc6 = nn.Linear(in_channels, representation_size)
         self.fc7 = nn.Linear(representation_size, representation_size)
+        self.relation_layers_num = relation_layers_num
 
-    def forward(self, x):
+    def forward(self, x, rois):
+        # import pdb
+        # pdb.set_trace()
         x = x.flatten(start_dim=1)
 
-        x = F.relu(self.fc6(x))
-        x = F.relu(self.fc7(x))
+        # first fully connected layer add relation network
+        fc6_feat = self.fc6(x)
+        # for i in range(self.relation_layers_num):
+        #     attention = self.relation_network_list[i](fc6_feat, rois)
+        #     fc6_feat = fc6_feat + attention
+        attention = self.attention_network1(fc6_feat, rois)
+        fc6_feat = fc6_feat + attention
+        fc6_feat_new = F.relu(fc6_feat)
 
-        return x
+        # second fully connected layer add relation network
+        fc7_feat = self.fc7(fc6_feat_new)
+        # for i in range(self.relation_layers_num):
+        #     attention2 = self.relation_network_list2[i](fc7_feat, rois)
+        #     fc7_feat = fc7_feat + attention2
+        attention2 = self.attention_network2(fc7_feat, rois)
+        fc7_feat = fc7_feat + attention2
+        fc7_feat_new = F.relu(self.fc7(fc7_feat))
+
+        return fc7_feat_new
 
 
 class FastRCNNPredictor(nn.Module):
@@ -345,7 +505,7 @@ def fasterrcnn_resnet50_fpn(pretrained=False, progress=True,
         model.load_state_dict(state_dict)
     return model
 
-def fasterrcnn_resnet101_fpn(pretrained=False, progress=True,
+def fasterrcnn_resnet101_fpn(device, pretrained=False, progress=True,
                             num_classes=91, pretrained_backbone=True, trainable_backbone_layers=3, **kwargs):
     """
     Constructs a Faster R-CNN model with a ResNet-50-FPN backbone.
@@ -403,7 +563,7 @@ def fasterrcnn_resnet101_fpn(pretrained=False, progress=True,
         # no need to download the backbone if pretrained is set
         pretrained_backbone = False
     backbone = resnet_fpn_backbone('resnet101', pretrained_backbone, trainable_layers=trainable_backbone_layers)
-    model = FasterRCNN(backbone, num_classes, **kwargs)
+    model = FasterRCNN(backbone, device, num_classes, **kwargs)
     if pretrained:
         state_dict = load_state_dict_from_url(model_urls['fasterrcnn_resnet50_fpn_coco'],
                                               progress=progress)
