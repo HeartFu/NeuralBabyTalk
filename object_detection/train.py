@@ -132,13 +132,14 @@ def main(args):
         train_one_epoch(model, optimizer, data_loader, device, epoch, args.print_freq)
         lr_scheduler.step()
         if args.output_dir:
-            utils.save_on_master({
-                'model': model_without_ddp.state_dict(),
-                'optimizer': optimizer.state_dict(),
-                'lr_scheduler': lr_scheduler.state_dict(),
-                'args': args,
-                'epoch': epoch},
-                os.path.join(args.output_dir, 'model_{}.pth'.format(epoch)))
+            if (epoch + 1) % 5 == 0:
+                utils.save_on_master({
+                    'model': model_without_ddp.state_dict(),
+                    'optimizer': optimizer.state_dict(),
+                    'lr_scheduler': lr_scheduler.state_dict(),
+                    'args': args,
+                    'epoch': epoch},
+                    os.path.join(args.output_dir, 'model_{}.pth'.format(epoch)))
 
         # evaluate after every epoch
         evaluate(model, data_loader_test, device=device)
@@ -147,7 +148,7 @@ def main(args):
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))
     print('Training time {}'.format(total_time_str))
 
-# python -m torch.distributed.launch --nproc_per_node=4 --use_env train.py --dataset coco --epochs 26 --lr-steps 16 22 --aspect-ratio-group-factor 3
+# python -m torch.distributed.launch --nproc_per_node=4 --use_env train.py --dataset coco --epochs 30 --lr-steps 16 22 --aspect-ratio-group-factor 3
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser(
@@ -177,7 +178,7 @@ if __name__ == "__main__":
     parser.add_argument('--lr-steps', default=[16, 22], nargs='+', type=int, help='decrease lr every step-size epochs')
     parser.add_argument('--lr-gamma', default=0.1, type=float, help='decrease lr by a factor of lr-gamma')
     parser.add_argument('--print-freq', default=20, type=int, help='print frequency')
-    parser.add_argument('--output-dir', default='relation_1_1/', help='path where to save')
+    parser.add_argument('--output-dir', default='relation_1_1_new/', help='path where to save')
     parser.add_argument('--resume', default='', help='resume from checkpoint')
     parser.add_argument('--start_epoch', default=0, type=int, help='start epoch')
     parser.add_argument('--aspect-ratio-group-factor', default=3, type=int)

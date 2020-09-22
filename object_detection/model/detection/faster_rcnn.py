@@ -3,6 +3,7 @@ from collections import OrderedDict
 import torch
 from torch import nn
 import torch.nn.functional as F
+import numpy as np
 
 from torchvision.ops import misc as misc_nn_ops, roi_align
 # from torchvision.ops import MultiScaleRoIAlign
@@ -382,6 +383,103 @@ class TwoMLPHead(nn.Module):
         self.fc7 = nn.Linear(representation_size, representation_size)
         self.relation_layers_num = relation_layers_num
 
+    # for relation network
+    def extract_position_matrix(self, sliced_rois, nongt_dim):
+        """
+        Extract position matrix, mapping the 4-dimensional relative geometry feature in paper
+        Args:
+            sliced_rois:
+            nongt_dim:
+
+        Returns:
+            Returns:
+            position_matrix: [num_boxes, nongt_dim, 4]
+        """
+        # bboxes shape: [batch_size, num_bbox, 4]
+        # shape: [num_bbox, 1]
+        xmin, ymin, xmax, ymax = sliced_rois[:, 0:1], sliced_rois[:, 1:2], sliced_rois[:, 2:3], sliced_rois[:, 3:4]
+        # 根据xmin、ymin、xmax、ymax计算得到中心点坐标center_x、center_y，宽bbox_width和高bbox_height
+        bbox_width = xmax - xmin + 1
+        bbox_height = ymax - ymin + 1
+        center_x = 0.5 * (xmin + xmax)
+        center_y = 0.5 * (ymin + ymax)
+
+        min_value = torch.from_numpy(np.asarray([1e-3])).float().cuda()
+
+        # 执行sub、div后得到的delta_x的维度都是[num_boxes, num_boxes]，
+        # 且该矩阵的对角线都是0。执行log后得到的delta_x的维度仍然是[num_boxes, num_boxes]，
+        # 且对角线不存在0值，之所以log函数的输入有个maximum方法，是因为当log函数的输入是0时，输出是无穷小。
+
+        delta_x = torch.sub(center_x, center_x.t())
+        delta_x = torch.div(delta_x, bbox_width)
+        delta_x = torch.max(torch.abs(delta_x), min_value)
+        delta_x = torch.log(delta_x)
+
+        delta_y = torch.sub(center_y, center_y.t())
+        delta_y = torch.div(delta_y, bbox_height)
+        delta_y = torch.log(torch.max(torch.abs(delta_y), min_value))
+
+        delta_width = torch.div(bbox_width, bbox_width.t())
+        delta_width = torch.log(delta_width)
+
+        delta_height = torch.div(bbox_height, bbox_height.t())
+        delta_height = torch.log(delta_height)
+
+        # concat_list是一个长度为4的列表，列表中的每个值的维度是[num_boxes, num_boxes]。
+        concat_list = [delta_x, delta_y, delta_width, delta_height]
+        # 接下来这个循环会将concat_list列表中的每个值在维度1上取0到nongt_dim（默认是300），
+        # 因此得到的sym的维度就是[num_boxes, nongt_dim]；第二行则是新增了一个维度2，因此concat_list[idx]的
+        # 维度就是[num_boxes, nongt_dim, 1]。因此最后得到的concat_list就是长度为4的列表，
+        # 列表中的每个值的维度是[num_boxes, nongt_dim, 1]，
+        # concat后返回维度为[num_boxes, nongt_dim, 4]的position_matrix。
+        for idx, sym in enumerate(concat_list):
+            sym = sym[:, 0:nongt_dim]
+            concat_list[idx] = sym.unsqueeze(-1)
+
+        # 将concat_list列表中的4个值在维度2上进行concat，
+        # 得到维度为[num_boxes, nongt_dim, 4]的position_matrix。
+        position_matrix = torch.cat(concat_list, dim=2)
+
+        return position_matrix
+
+    # for relation network
+    def extract_position_embedding(self, position_mat, feat_dim=64, wave_length=1000):
+        """
+        Implement Embedding for geogmetry feature, mapping formula 5 in paper
+        Args:
+            self:
+            feat_dim:
+
+        Returns:
+
+        """
+        # TODO:
+        # feat_range是[0,1,2,3,4,5,6,7]。full的第一个输入表示shape，第二个输入表示value，
+        # 因此这里表示维度为1，值为1000的symbol。得到dim_mat=[1., 2.37137365, 5.62341309,
+        # 13.33521461, 31.62277603, 74.98941803, 177.82794189, 421.69650269]，
+        # 维度是1*8，之后reshape成1*1*1*8。 对应源码
+        feat_range = torch.arange(0, feat_dim/8)
+        dim_mat = torch.full((1,), wave_length) ** (8. / feat_dim * feat_range)
+        # dim_mat = torch.from_numpy(
+        #     np.asarray([[[[1., 2.3713737, 5.623413, 13.335215, 31.622776, 74.98942, 177.82794, 421.6965]]]])).cuda()
+        dim_mat = torch.reshape(dim_mat, shape=(1, 1, 1, -1)).float().cuda()
+        # pdb.set_trace()
+        # position_mat增加维度3变成 [num_rois, nongt_dim, 4, 1]，div_mat的维度
+        # 是 [num_rois, nongt_dim, 4, 8]，然后执行sin函数和cos函数操作得到相同维度的sin_mat和cos_mat。
+        # 接着在维度3对sin_mat和cos_mat做concat操作，得到维度为[num_rois, nongt_dim, 4,
+        # feat_dim/4]的输出，最后reshape成 [num_rois, nongt_dim, feat_dim]的embedding。
+        position_mat = (100.0 * position_mat).unsqueeze(-1)
+        div_mat = torch.div(position_mat, dim_mat)
+        sin_mat = torch.sin(div_mat)
+        cos_mat = torch.cos(div_mat)
+        # embedding, [num_rois, nongt_dim, 4, feat_dim/4]
+        embedding = torch.cat([sin_mat, cos_mat], dim=3)
+        # embedding, [num_rois, nongt_dim, feat_dim]
+        embedding = torch.reshape(embedding, shape=(embedding.size(0), embedding.size(1), feat_dim))
+
+        return embedding
+
+
     def forward(self, x, rois):
         # import pdb
         # pdb.set_trace()
@@ -392,8 +490,26 @@ class TwoMLPHead(nn.Module):
         # for i in range(self.relation_layers_num):
         #     attention = self.relation_network_list[i](fc6_feat, rois)
         #     fc6_feat = fc6_feat + attention
-        attention = self.attention_network1(fc6_feat, rois)
-        fc6_feat = fc6_feat + attention
+
+        sliced_rois = rois[:, 1:5]
+        # TODO: Check nongt_dim
+        if self.train:
+            nongt_dim = 300
+        else:
+            nongt_dim = 300
+
+        # [num_rois, nongt_dim, 4]
+        position_matrix = self.extract_position_matrix(sliced_rois, nongt_dim=nongt_dim)
+
+        # [num_rois, nongt_dim, 64]
+        # 这一步调用extract_position_embedding方法实现论文中公式5的EG操作。
+        position_embedding = self.extract_position_embedding(position_matrix, feat_dim=64)
+        position_embedding_reshape = position_embedding.permute(2, 0, 1)
+        position_embedding_reshape = torch.unsqueeze(position_embedding_reshape, dim=0).contiguous()
+        attention1 = self.attention_network1(fc6_feat, position_embedding_reshape, nongt_dim)
+
+        # attention = self.attention_network1(fc6_feat, rois)
+        fc6_feat = fc6_feat + attention1
         fc6_feat_new = F.relu(fc6_feat)
 
         # second fully connected layer add relation network
@@ -401,7 +517,7 @@ class TwoMLPHead(nn.Module):
         # for i in range(self.relation_layers_num):
         #     attention2 = self.relation_network_list2[i](fc7_feat, rois)
         #     fc7_feat = fc7_feat + attention2
-        attention2 = self.attention_network2(fc7_feat, rois)
+        attention2 = self.attention_network2(fc7_feat, position_embedding_reshape, nongt_dim)
         fc7_feat = fc7_feat + attention2
         fc7_feat_new = F.relu(self.fc7(fc7_feat))
 
