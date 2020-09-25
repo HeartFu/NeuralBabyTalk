@@ -18,7 +18,6 @@ from .roi_heads import RoIHeads
 from .transform import GeneralizedRCNNTransform
 from .backbone_utils import resnet_fpn_backbone
 
-
 __all__ = [
     "FasterRCNN", "fasterrcnn_resnet50_fpn",
 ]
@@ -202,9 +201,9 @@ class FasterRCNN(GeneralizedRCNN):
             resolution = box_roi_pool.output_size[0]
             representation_size = 1024
             box_head = TwoMLPHead(
-                device,
                 out_channels * resolution ** 2,
-                representation_size)
+                representation_size,
+                relation_layers_num=1)
 
         if box_predictor is None:
             representation_size = 1024
@@ -227,6 +226,7 @@ class FasterRCNN(GeneralizedRCNN):
         transform = GeneralizedRCNNTransform(min_size, max_size, image_mean, image_std)
 
         super(FasterRCNN, self).__init__(backbone, rpn, roi_heads, transform)
+
 
 class MultiScaleRoIAlign(nn.Module):
     """
@@ -364,7 +364,7 @@ class TwoMLPHead(nn.Module):
         representation_size (int): size of the intermediate representation
     """
 
-    def __init__(self, device, in_channels, representation_size, relation_layers_num=1):
+    def __init__(self, in_channels, representation_size, relation_layers_num=1):
         super(TwoMLPHead, self).__init__()
         # relation_network_list = [] # for fully connected layer 1
         # relation_network_list2 = [] # for fully connected layer 2
@@ -375,9 +375,11 @@ class TwoMLPHead(nn.Module):
         # self.relation_network = RelationNetwork(fc_dim=16, feat_dim=1024, dim=(1024,1024,1024), group=16, emb_dim=64, input_dim=1024)
         # self.relation_network_list = relation_network_list
         # self.relation_network_list2 = relation_network_list2
-
-        self.attention_network1 = RelationNetwork(fc_dim=16, feat_dim=1024, dim=(1024,1024,1024), group=16, emb_dim=64, input_dim=1024)
-        self.attention_network2 = RelationNetwork(fc_dim=16, feat_dim=1024, dim=(1024,1024,1024), group=16, emb_dim=64, input_dim=1024)
+        if relation_layers_num != 0:
+            self.attention_network1 = RelationNetwork(fc_dim=16, feat_dim=1024, dim=(1024, 1024, 1024), group=16,
+                                                      emb_dim=64, input_dim=1024)
+            self.attention_network2 = RelationNetwork(fc_dim=16, feat_dim=1024, dim=(1024, 1024, 1024), group=16,
+                                                      emb_dim=64, input_dim=1024)
 
         self.fc6 = nn.Linear(in_channels, representation_size)
         self.fc7 = nn.Linear(representation_size, representation_size)
@@ -458,7 +460,7 @@ class TwoMLPHead(nn.Module):
         # 因此这里表示维度为1，值为1000的symbol。得到dim_mat=[1., 2.37137365, 5.62341309,
         # 13.33521461, 31.62277603, 74.98941803, 177.82794189, 421.69650269]，
         # 维度是1*8，之后reshape成1*1*1*8。 对应源码
-        feat_range = torch.arange(0, feat_dim/8)
+        feat_range = torch.arange(0, feat_dim / 8)
         dim_mat = torch.full((1,), wave_length) ** (8. / feat_dim * feat_range)
         # dim_mat = torch.from_numpy(
         #     np.asarray([[[[1., 2.3713737, 5.623413, 13.335215, 31.622776, 74.98942, 177.82794, 421.6965]]]])).cuda()
@@ -479,7 +481,6 @@ class TwoMLPHead(nn.Module):
 
         return embedding
 
-
     def forward(self, x, rois):
         # import pdb
         # pdb.set_trace()
@@ -491,25 +492,29 @@ class TwoMLPHead(nn.Module):
         #     attention = self.relation_network_list[i](fc6_feat, rois)
         #     fc6_feat = fc6_feat + attention
 
-        sliced_rois = rois[:, 1:5]
-        # TODO: Check nongt_dim
-        if self.train:
-            nongt_dim = 300
+        if self.relation_layers_num != 0:
+            sliced_rois = rois[:, 1:5]
+            # TODO: Check nongt_dim
+            if self.train:
+                nongt_dim = 300
+            else:
+                nongt_dim = 300
+
+            # [num_rois, nongt_dim, 4]
+            position_matrix = self.extract_position_matrix(sliced_rois, nongt_dim=nongt_dim)
+
+            # [num_rois, nongt_dim, 64]
+            # 这一步调用extract_position_embedding方法实现论文中公式5的EG操作。
+            position_embedding = self.extract_position_embedding(position_matrix, feat_dim=64)
+            position_embedding_reshape = position_embedding.permute(2, 0, 1)
+            position_embedding_reshape = torch.unsqueeze(position_embedding_reshape, dim=0).contiguous()
+            attention1 = self.attention_network1(fc6_feat, position_embedding_reshape, nongt_dim)
+
+            # attention = self.attention_network1(fc6_feat, rois)
+            fc6_feat = fc6_feat + attention1
         else:
-            nongt_dim = 300
-
-        # [num_rois, nongt_dim, 4]
-        position_matrix = self.extract_position_matrix(sliced_rois, nongt_dim=nongt_dim)
-
-        # [num_rois, nongt_dim, 64]
-        # 这一步调用extract_position_embedding方法实现论文中公式5的EG操作。
-        position_embedding = self.extract_position_embedding(position_matrix, feat_dim=64)
-        position_embedding_reshape = position_embedding.permute(2, 0, 1)
-        position_embedding_reshape = torch.unsqueeze(position_embedding_reshape, dim=0).contiguous()
-        attention1 = self.attention_network1(fc6_feat, position_embedding_reshape, nongt_dim)
-
-        # attention = self.attention_network1(fc6_feat, rois)
-        fc6_feat = fc6_feat + attention1
+            position_embedding_reshape = None
+            nongt_dim = 0
         fc6_feat_new = F.relu(fc6_feat)
 
         # second fully connected layer add relation network
@@ -517,9 +522,10 @@ class TwoMLPHead(nn.Module):
         # for i in range(self.relation_layers_num):
         #     attention2 = self.relation_network_list2[i](fc7_feat, rois)
         #     fc7_feat = fc7_feat + attention2
-        attention2 = self.attention_network2(fc7_feat, position_embedding_reshape, nongt_dim)
-        fc7_feat = fc7_feat + attention2
-        fc7_feat_new = F.relu(self.fc7(fc7_feat))
+        if self.relation_layers_num != 0:
+            attention2 = self.attention_network2(fc7_feat, position_embedding_reshape, nongt_dim)
+            fc7_feat = fc7_feat + attention2
+        fc7_feat_new = F.relu(fc7_feat)
 
         return fc7_feat_new
 
@@ -621,8 +627,9 @@ def fasterrcnn_resnet50_fpn(pretrained=False, progress=True,
         model.load_state_dict(state_dict)
     return model
 
+
 def fasterrcnn_resnet101_fpn(device, pretrained=False, progress=True,
-                            num_classes=91, pretrained_backbone=True, trainable_backbone_layers=3, **kwargs):
+                             num_classes=91, pretrained_backbone=True, trainable_backbone_layers=3, **kwargs):
     """
     Constructs a Faster R-CNN model with a ResNet-50-FPN backbone.
     The input to the model is expected to be a list of tensors, each of shape ``[C, H, W]``, one for each
