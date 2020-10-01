@@ -12,7 +12,7 @@ if __name__ == '__main__':
                         help='result root dir path')
     parser.add_argument('--anntations_dir', default='annotations/instances_val2014.json',
                         help='dataset annotations path')
-    parser.add_argument('--result_name', default='nbt_obj_det_result_val.json',
+    parser.add_argument('--result_name', default='obj_det_result_val.json',
                         help='object detection result json file name')
     # parser.add_argument('--train_dir', default='annotations/instances_train2014.json',
     #                     help='train set annotations path')
@@ -42,8 +42,8 @@ if __name__ == '__main__':
 
     # validation set
     cocoEval = COCOeval(COCO, COCO_Dt, 'bbox')
-    imgIds = sorted(COCO.getImgIds([262284]))
-    # imgIds = imgIds[2:3]
+    imgIds = sorted(COCO.getImgIds())
+    imgIds = imgIds[2:3]
     print(imgIds)
     cocoEval.params.imgIds = imgIds
     cocoEval.evaluate()

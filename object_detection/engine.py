@@ -10,7 +10,7 @@ from coco_eval import CocoEvaluator
 import utils
 
 
-def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq):
+def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq, transfer_learning):
     model.train()
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
@@ -37,6 +37,10 @@ def train_one_epoch(model, optimizer, data_loader, device, epoch, print_freq):
 
         _, loss_dict = model(images, targets)
 
+        # if transfer_learning:
+        #     losses = sum(loss_dict[key] if key == 'loss_box_reg' or key == 'loss_classifier' else torch.zeros_like(
+        #         loss_dict[key]) for key in loss_dict.keys())
+        # else:
         losses = sum(loss for loss in loss_dict.values())
 
         # reduce losses over all GPUs for logging purposes

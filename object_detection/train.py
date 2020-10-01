@@ -105,7 +105,10 @@ def main(args):
 
     model_without_ddp = model
     if args.distributed:
-        model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
+        if args.transfer_learning:
+            model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu], find_unused_parameters=True)
+        else:
+            model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
         model_without_ddp = model.module
 
     params = [p for p in model.parameters() if p.requires_grad]
@@ -115,7 +118,30 @@ def main(args):
     # lr_scheduler = torch.optim.lr_scheduler.StepLR(optimizer, step_size=args.lr_step_size, gamma=args.lr_gamma)
     lr_scheduler = torch.optim.lr_scheduler.MultiStepLR(optimizer, milestones=args.lr_steps, gamma=args.lr_gamma)
 
-    if args.resume:
+    # import pdb
+    # pdb.set_trace()
+    if args.transfer_learning and args.resume:
+        checkpoint = torch.load(args.resume, map_location='cpu')
+        weights = checkpoint['model']
+
+        # model_without_ddp.load_state_dict(checkpoint['model'])
+        # weights = torch.load(checkpoint['model'])
+        # froken the other layers to check the relation network ok
+        for _n, par in model_without_ddp.named_parameters():
+            if _n.startswith('roi_heads.') or _n.startswith('rpn.'):
+                print(_n)
+                par.requires_grad = True
+            else:
+                if _n in weights.keys():
+                    par.requires_grad = False
+                    par.copy_(weights[_n])
+                else:
+                    print(_n)
+                    par.requires_grad = True
+    # import pdb
+    # pdb.set_trace()
+
+    if args.resume and not args.transfer_learning:
         checkpoint = torch.load(args.resume, map_location='cpu')
         model_without_ddp.load_state_dict(checkpoint['model'])
         optimizer.load_state_dict(checkpoint['optimizer'])
@@ -131,7 +157,7 @@ def main(args):
     for epoch in range(args.start_epoch, args.epochs):
         if args.distributed:
             train_sampler.set_epoch(epoch)
-        train_one_epoch(model, optimizer, data_loader, device, epoch, args.print_freq)
+        train_one_epoch(model, optimizer, data_loader, device, epoch, args.print_freq, args.transfer_learning)
         lr_scheduler.step()
         if args.output_dir:
             if (epoch + 1) % 5 == 0:
@@ -156,7 +182,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description=__doc__)
 
-    # parser.add_argument('--data-path', default='/home/fanfu/newdisk/dataset/coco/test', help='dataset')
+    # parser.add_argument('--data-path', default='/home/scratch/COCO/coco2014', help='dataset')
     parser.add_argument('--data-path', default='/home/fanfu/newdisk/dataset/coco/2014', help='dataset')
     # parser.add_argument('--data-path', default='/import/nobackup_mmv_ioannisp/shared/datasets/coco2014/', help='dataset')
     parser.add_argument('--dataset', default='coco', help='dataset')
@@ -182,6 +208,8 @@ if __name__ == "__main__":
     parser.add_argument('--print-freq', default=20, type=int, help='print frequency')
     parser.add_argument('--output-dir', default='relation_1_1_new/', help='path where to save')
     parser.add_argument('--resume', default='', help='resume from checkpoint')
+    parser.add_argument('--transfer-learning', default=False, help='transfer learning from checkpoint which load in '
+                                                                   'resume parameter')
     parser.add_argument('--start_epoch', default=0, type=int, help='start epoch')
     parser.add_argument('--aspect-ratio-group-factor', default=3, type=int)
     parser.add_argument(
