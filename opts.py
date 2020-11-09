@@ -11,9 +11,13 @@ def parse_opt():
                     help='path to the json file containing additional info and vocab')
     parser.add_argument('--input_dic', type=str, default='data/coco/dic_coco.json',
                     help='path to the json containing the preprocessed dataset')
-    parser.add_argument('--image_path', type=str, default='/srv/share/datasets/coco/images',
-                    help='path to the h5file containing the image data') 
-    parser.add_argument('--proposal_h5', type=str, default='data/coco/detector.json',
+    # parser.add_argument('--image_path', type=str, default='/srv/share/datasets/coco/images',
+    #                 help='path to the h5file containing the image data')
+    parser.add_argument('--image_path', type=str, default='/home/fanfu/newdisk/dataset/coco/2014/images',
+                    help='path to the h5file containing the image data')
+    # parser.add_argument('--image_path', type=str, default='/import/nobackup_mmv_ioannisp/shared/datasets/coco2014/images',
+    #                   help='path to the h5file containing the image data')
+    parser.add_argument('--proposal_h5', type=str, default='data/coco/coco_detection.h5',
                     help='path to the json containing the detection result.') 
     parser.add_argument('--cnn_backend', type=str, default='res101',
                     help='res101 or vgg16') 
@@ -158,6 +162,48 @@ def parse_opt():
                     help='whether use oracle bounding box.')
     parser.add_argument('--ppls_thresh', type=float, default=0.5,
                     help='which proposals could be used from the Faster RCNN')
+
+    # relation module
+    parser.add_argument('--relation_type', type=str, default='spatial',
+                    help='type of relationship')
+    parser.add_argument('--spatial_path', type=str, default='data/coco/relationship/spatial_info.json',
+                    help='spatial matrix json path')
+    parser.add_argument('--semantic_path', type=str, default='data/coco/relationship/semantic_info.json',
+                    help='semantic matrix json path')
+    parser.add_argument('--relation_dim', type=int, default=1024,
+                    help='relation feature dim')
+    parser.add_argument('--dir_num', type=int, default=2,
+                    help='number of directions in relation graph')
+    parser.add_argument('--nongt_dim', type=int, default=20,
+                    help='number of objects consider relations per image')
+    parser.add_argument('--num_heads', type=int, default=16,
+                    help='number of attention heads \
+                                  for multi-head attention')
+    parser.add_argument('--num_steps', type=int, default=1,
+                    help='number of graph propagation steps')
+    parser.add_argument('--residual_connection', action='store_true',
+                    help='Enable residual connection in relation encoder')
+    parser.add_argument('--label_bias', action='store_true',
+                    help='Enable bias term for relation labels \
+                                  in relation encoder')
+    # split the relation type
+    # parser.add_argument('--implicit_type', action='store_true',
+    #                 help='Enable implicit relation module to add the pooling feature')
+    # parser.add_argument('--spatial_type', action='store_true',
+    #                     help='Enable spatial relation module to add the pooling feature')
+    # parser.add_argument('--semantic_type', action='store_true',
+    #                     help='Enable semantic relation module to add the pooling feature')
+
+    # hyper-parameters for implicit relation
+    parser.add_argument('--imp_pos_emb_dim', type=int, default=64,
+                    help='geometric embedding feature dim')
+
+    # hyper-parameters for explicit relation
+    parser.add_argument('--spa_label_num', type=int, default=11,
+                        help='number of edge labels in spatial relation graph')
+    parser.add_argument('--sem_label_num', type=int, default=15,
+                        help='number of edge labels in \
+                                  semantic relation graph')
     args = parser.parse_args()
 
     return args

@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from torchvision.models.detection import fasterrcnn_resnet50_fpn
 from torch.autograd import *
 import misc.utils as utils
+from misc.relation.relation_encoder import ImplicitRelationEncoder, ExplicitRelationEncoder
 from misc.resnet import resnet
 from misc.vgg16 import vgg16
 from misc.CaptionModel import CaptionModel
@@ -23,6 +24,8 @@ import math
 import numpy as np
 # from misc.adaptiveLSTMCell import adaptiveLSTMCell
 import pdb
+
+from relation_utils import extract_implict_position
 
 
 class AttModel(CaptionModel):
@@ -52,7 +55,10 @@ class AttModel(CaptionModel):
         self.att_size = int(opt.image_crop_size / self.stride)
         self.tiny_value = 1e-8
 
-        self.pool_feat_size = self.att_feat_size + 300 * 2
+        if opt.relation_type == 'implicit' or opt.relation_type == 'spatial' or opt.relation_type == 'semantic':
+            self.pool_feat_size = opt.relation_dim + 300 * 2
+        else:
+            self.pool_feat_size = self.att_feat_size + 300 * 2
         self.ss_prob = 0.0  # Schedule sampling probability
         self.min_value = -1e8
         opt.beta = 1
@@ -72,27 +78,27 @@ class AttModel(CaptionModel):
         # self.det_oracle = opt.det_oracle
 
         self.det_fc = nn.Sequential(nn.Embedding(self.detect_size + 1, 300),
-                                    nn.ReLU(),
+                                    nn.ReLU(inplace=opt.inplace),
                                     nn.Dropout())
 
         self.loc_fc = nn.Sequential(nn.Linear(5, 300),
-                                    nn.ReLU(),
+                                    nn.ReLU(inplace=opt.inplace),
                                     nn.Dropout())
 
         self.embed = nn.Sequential(nn.Embedding(self.vocab_size + self.detect_size + 1, self.input_encoding_size),
-                                   nn.ReLU(),
+                                   nn.ReLU(inplace=opt.inplace),
                                    nn.Dropout(self.drop_prob_lm))
 
         self.fc_embed = nn.Sequential(nn.Linear(self.fc_feat_size, self.rnn_size),
-                                      nn.ReLU(),
+                                      nn.ReLU(inplace=opt.inplace),
                                       nn.Dropout(self.drop_prob_lm))
 
         self.att_embed = nn.Sequential(nn.Linear(self.att_feat_size, self.rnn_size),
-                                       nn.ReLU(),
+                                       nn.ReLU(inplace=opt.inplace),
                                        nn.Dropout(self.drop_prob_lm))
 
         self.pool_embed = nn.Sequential(nn.Linear(self.pool_feat_size, self.rnn_size),
-                                        nn.ReLU(),
+                                        nn.ReLU(inplace=opt.inplace),
                                         nn.Dropout(self.drop_prob_lm))
 
         self.ctx2att = nn.Linear(self.rnn_size, self.att_hid_size)
@@ -119,6 +125,60 @@ class AttModel(CaptionModel):
         self.det_fc[0].weight.data.copy_(opt.glove_clss)
         for p in self.det_fc[0].parameters(): p.requires_grad = False
 
+        # initialize relation module
+        self.nongt_dim = opt.nongt_dim
+        self.imp_pos_emb_dim = opt.imp_pos_emb_dim
+        self.relation_type = opt.relation_type
+
+        # if opt.implicit_type:
+        #     self.imp_relation = ImplicitRelationEncoder(
+        #         self.att_feat_size, opt.relation_dim,
+        #         opt.dir_num, opt.imp_pos_emb_dim, opt.nongt_dim,
+        #         num_heads=opt.num_heads, num_steps=opt.num_steps,
+        #         residual_connection=opt.residual_connection,
+        #         label_bias=opt.label_bias)
+        # if opt.spatial_type:
+        #     self.spa_relation = ExplicitRelationEncoder(
+        #         self.att_feat_size, opt.relation_dim,
+        #         opt.dir_num, opt.spa_label_num,
+        #         num_heads=opt.num_heads, num_steps=opt.num_steps,
+        #         nongt_dim=opt.nongt_dim,
+        #         residual_connection=opt.residual_connection,
+        #         label_bias=opt.label_bias
+        #     )
+        # if opt.semantic_tpye:
+        #     self.sem_relation = ExplicitRelationEncoder(
+        #         self.att_feat_size, opt.relation_dim,
+        #         opt.dir_num, opt.sem_label_num,
+        #         num_heads=opt.num_heads,
+        #         num_steps=opt.num_steps, nongt_dim=opt.nongt_dim,
+        #         residual_connection=opt.residual_connection,
+        #         label_bias=opt.label_bias)
+        if opt.relation_type == 'implicit':
+            self.v_relation = ImplicitRelationEncoder(
+                        self.att_feat_size, opt.relation_dim,
+                        opt.dir_num, opt.imp_pos_emb_dim, opt.nongt_dim,
+                        num_heads=opt.num_heads, num_steps=opt.num_steps,
+                        residual_connection=opt.residual_connection,
+                        label_bias=opt.label_bias)
+        elif opt.relation_type == 'spatial':
+            self.v_relation = ExplicitRelationEncoder(
+                self.att_feat_size, opt.relation_dim,
+                opt.dir_num, opt.spa_label_num,
+                num_heads=opt.num_heads, num_steps=opt.num_steps,
+                nongt_dim=opt.nongt_dim,
+                residual_connection=opt.residual_connection,
+                label_bias=opt.label_bias
+            )
+        elif opt.relation_type == 'semantic':
+            self.v_relation = ExplicitRelationEncoder(
+                self.att_feat_size, opt.relation_dim,
+                opt.dir_num, opt.sem_label_num,
+                num_heads=opt.num_heads,
+                num_steps=opt.num_steps, nongt_dim=opt.nongt_dim,
+                residual_connection=opt.residual_connection,
+                label_bias=opt.label_bias)
+
     def _reinit_word_weight(self, opt, ctoi, wtoi):
         self.det_fc[0].weight.data.copy_(opt.glove_clss)
         for p in self.det_fc[0].parameters(): p.requires_grad = False
@@ -134,9 +194,9 @@ class AttModel(CaptionModel):
                 pdb.set_trace()
             self.embed[0].weight.data[idx_old].copy_(self.embed[0].weight.data[idx_new])
 
-    def forward(self, img, seq, gt_seq, num, ppls, gt_boxes, mask_boxes, opt, eval_opt={}):
+    def forward(self, img, seq, gt_seq, num, ppls, gt_boxes, mask_boxes, opt, pos_emb=None, spa_adj_matrix=None, eval_opt={}):
         if opt == 'MLE':
-            return self._forward(img, seq, ppls, gt_boxes, mask_boxes, num)
+            return self._forward(img, seq, ppls, gt_boxes, mask_boxes, num, pos_emb, spa_adj_matrix)
         elif opt == 'RL':
             # with torch.no_grad():
             greedy_result = self._sample(Variable(img.data, volatile=True), Variable(ppls.data, volatile=True), \
@@ -153,7 +213,7 @@ class AttModel(CaptionModel):
             return lm_loss, bn_loss, fg_loss, cider_score
 
         elif opt == 'sample':
-            seq, bn_seq, fg_seq, seqLogprobs, bnLogprobs, fgLogprobs = self._sample(img, ppls, num, eval_opt)
+            seq, bn_seq, fg_seq, seqLogprobs, bnLogprobs, fgLogprobs = self._sample(img, ppls, num, pos_emb, spa_adj_matrix, eval_opt)
             return Variable(seq), Variable(bn_seq), Variable(fg_seq)
 
     def init_hidden(self, bsz):
@@ -161,34 +221,20 @@ class AttModel(CaptionModel):
         return (Variable(weight.new(self.num_layers, bsz, self.rnn_size).zero_()),
                 Variable(weight.new(self.num_layers, bsz, self.rnn_size).zero_()))
 
-    def extract_proposals(self, img, gt_boxes, ppls_thresh=0.5):
-        pad_proposals = np.zeros((self.max_proposal, 6))
-        if self.det_oracle == False:
-            with torch.no_grad():
-                self.faster_rcnn.eval()
-                prediction = self.faster_rcnn(img)
-            scores = prediction[0]['scores']
-            pos = scores > ppls_thresh
-            num_pos = int(pos.num())
-            bboxes = prediction[0]['boxes'][:num_pos, :]
-            classes = prediction[0]['labels'][:num_pos, :]
-            scores_bboxes = prediction[0]['scores'][:num_pos, :]
-            proposals = torch.cat((bboxes, classes, scores_bboxes), 1)
-            # resize the proposals
-            # TODO: check whethe need resize proposal and RandomCrop(including on dataloader_coco)
-            # if self.training:
-            #     proposals = utils.resize_bbox(proposals, width, height, self.opt.image_size, self.opt.image_size)
-            # img, proposals, gt_bboxs = utils.RandomCropWithBbox(img, proposals, gt_bboxs)
 
-            num_pps = min(proposals.shape[0], self.max_proposal)
-            pad_proposals[:num_pps] = proposals[:num_pps]
-        else:
-            num_pps = min(gt_boxes.shape[0], self.max_proposal)
-            pad_proposals[:num_pps] = np.concatenate((gt_boxes[:num_pps], np.ones([num_pps, 1])), axis=1)
+    def add_relation_feat(self, pool_feats, implicit_pos_emb, spa_adj_matrix, sem_adj_matrix):
+        if self.relation_type == 'implicit':
+            # parepare position embedding
+            # implicit_pos_emb = extract_implict_position(rois, self.nongt_dim, self.imp_pos_emb_dim)
+            pool_feats = self.v_relation.forward(pool_feats, implicit_pos_emb)
+        elif self.relation_type == 'spatial':
+            pool_feats = self.v_relation.forward(pool_feats, spa_adj_matrix)
+        elif self.relation_type == 'implicit':
+            pool_feats = self.v_relation.forward(pool_feats, sem_adj_matrix)
+        return pool_feats
 
-        return pad_proposals
 
-    def _forward(self, img, seq, ppls, gt_boxes, mask_boxes, num):
+    def _forward(self, img, seq, ppls, gt_boxes, mask_boxes, num, pos_emd=None, spa_adj_matrix=None, sem_adj_matrix=None):
         seq = seq.view(-1, seq.size(2), seq.size(3))
         seq_update = seq.data.clone()
 
@@ -226,6 +272,9 @@ class AttModel(CaptionModel):
         # Map the proposals to feature maps which are from ResNet
         pool_feats = self.roi_align(conv_feats, Variable(rois.view(-1, 5)))
         pool_feats = pool_feats.view(batch_size, rois_num, self.att_feat_size)
+
+        # relation module
+        pool_feats = self.add_relation_feat(pool_feats, pos_emd, spa_adj_matrix, sem_adj_matrix)
 
         loc_input = ppls.data.new(batch_size, rois_num, 5)
         loc_input[:, :, :4] = ppls.data[:, :, :4] / self.image_crop_size
@@ -265,6 +314,7 @@ class AttModel(CaptionModel):
 
         # calculate the overlaps between the rois and gt_bbox.
         overlaps = utils.bbox_overlaps(ppls.data, gt_boxes.data)
+
         for i in range(self.seq_length):
             if self.training and i >= 1 and self.ss_prob > 0.0:  # otherwiste no need to sample
                 sample_prob = fc_feats.data.new(batch_size).uniform_(0, 1)
@@ -335,7 +385,7 @@ class AttModel(CaptionModel):
 
         return lm_loss, bn_loss, fg_loss
 
-    def _sample(self, img, ppls, num, opt={}):
+    def _sample(self, img, ppls, num, pos_emb=None, spa_adj_matrix=None, sem_adj_matrix=None, opt={}):
         sample_max = opt.get('sample_max', 1)
         beam_size = opt.get('beam_size', 1)
         temperature = opt.get('temperature', 1.0)
@@ -350,10 +400,11 @@ class AttModel(CaptionModel):
         if self.finetune_cnn:
             conv_feats, fc_feats = self.cnn(img)
         else:
-            # with torch.no_grad():
-            conv_feats, fc_feats = self.cnn(Variable(img.data, volatile=True))
-            conv_feats = Variable(conv_feats.data)
-            fc_feats = Variable(fc_feats.data)
+            with torch.no_grad():
+                conv_feats, fc_feats = self.cnn(img.data)
+                # conv_feats, fc_feats = self.cnn(Variable(img.data, volatile=True))
+                # conv_feats = Variable(conv_feats.data)
+                # fc_feats = Variable(fc_feats.data)
 
         # conv_feats, fc_feats = self.cnn(img)
         rois = ppls.data.new(batch_size, rois_num, 5)
@@ -362,6 +413,9 @@ class AttModel(CaptionModel):
         for i in range(batch_size): rois[i, :, 0] = i
         pool_feats = self.roi_align(conv_feats, Variable(rois.view(-1, 5)))
         pool_feats = pool_feats.view(batch_size, rois_num, self.att_feat_size)
+
+        # relationship
+        pool_feats = self.add_relation_feat(pool_feats, pos_emb, spa_adj_matrix, sem_adj_matrix)
 
         loc_input = ppls.data.new(batch_size, rois_num, 5)
         loc_input[:, :, :4] = ppls.data[:, :, :4] / self.image_crop_size

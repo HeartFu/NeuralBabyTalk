@@ -4,6 +4,7 @@ import torch
 from torch.autograd import Variable
 from tqdm import tqdm
 from misc import utils
+from relation_utils import prepare_graph_variables
 
 
 def eval_NBT(opt, model, dataset_val):
@@ -48,7 +49,7 @@ def eval_NBT(opt, model, dataset_val):
     # for step in range(len(dataloader_val)):
     for step, data in enumerate(progress_bar):
         # data = data_iter_val.next()
-        img, iseq, gts_seq, num, proposals, bboxs, box_mask, img_id = data
+        img, iseq, gts_seq, num, proposals, bboxs, box_mask, img_id, spa_adj_matrix, sem_adj_matrix = data
 
         proposals = proposals[:, :max(int(max(num[:, 1])), 1), :]
 
@@ -64,9 +65,18 @@ def eval_NBT(opt, model, dataset_val):
         # mask_bboxs.data.resize_(box_mask.size()).copy_(box_mask)
         input_imgs.resize_(img.size()).copy_(img)
 
+        spa_adj_matrix = spa_adj_matrix[:, :max(int(max(num[:, 1])), 1), :max(int(max(num[:, 1])), 1)]
+        sem_adj_matrix = sem_adj_matrix[:, :max(int(max(num[:, 1])), 1), :max(int(max(num[:, 1])), 1)]
+
+        # relationship modify
+        pos_emb_var, spa_adj_matrix, sem_adj_matrix = prepare_graph_variables(opt.relation_type, input_ppls, sem_adj_matrix, spa_adj_matrix,
+                                                              opt.nongt_dim, opt.imp_pos_emb_dim, opt.spa_label_num,
+                                                              opt.sem_label_num)
+
         eval_opt = {'sample_max': 1, 'beam_size': opt.beam_size, 'inference_mode': True, 'tag_size': opt.cbs_tag_size}
         seq, bn_seq, fg_seq = model(input_imgs, input_seqs, gt_seqs, \
-                                    input_num, input_ppls, gt_bboxs, mask_bboxs, 'sample', eval_opt)
+                                    input_num, input_ppls, gt_bboxs, mask_bboxs, 'sample', pos_emb_var, spa_adj_matrix,
+                                    sem_adj_matrix, eval_opt)
 
         sents = utils.decode_sequence(dataset_val.itow, dataset_val.itod, dataset_val.ltow, dataset_val.itoc, dataset_val.wtod, \
                                       seq.data, bn_seq.data, fg_seq.data, opt.vocab_size, opt)

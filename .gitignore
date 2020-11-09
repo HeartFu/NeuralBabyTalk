@@ -85,3 +85,9 @@ db.sqlite3
 # Demo
 visu/
 visu.json
+
+
+# classifier
+relationship_classifier/checkpoint/
+relationship_classifier/data/*.json
+relationship_classifier/log/

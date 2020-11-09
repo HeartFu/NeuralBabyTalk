@@ -378,7 +378,11 @@ class TwoMLPHead(nn.Module):
         if relation_layers_num != 0:
             self.attention_network1 = RelationNetwork(fc_dim=16, feat_dim=1024, dim=(1024, 1024, 1024), group=16,
                                                       emb_dim=64, input_dim=1024)
+            self.attention_network1_1 = RelationNetwork(fc_dim=16, feat_dim=1024, dim=(1024, 1024, 1024), group=16,
+                                                      emb_dim=64, input_dim=1024)
             self.attention_network2 = RelationNetwork(fc_dim=16, feat_dim=1024, dim=(1024, 1024, 1024), group=16,
+                                                      emb_dim=64, input_dim=1024)
+            self.attention_network2_2 = RelationNetwork(fc_dim=16, feat_dim=1024, dim=(1024, 1024, 1024), group=16,
                                                       emb_dim=64, input_dim=1024)
 
         self.fc6 = nn.Linear(in_channels, representation_size)
@@ -509,9 +513,10 @@ class TwoMLPHead(nn.Module):
             position_embedding_reshape = position_embedding.permute(2, 0, 1)
             position_embedding_reshape = torch.unsqueeze(position_embedding_reshape, dim=0).contiguous()
             attention1 = self.attention_network1(fc6_feat, position_embedding_reshape, nongt_dim)
-
+            attention1_2 = self.attention_network1_1(attention1, position_embedding_reshape, nongt_dim)
             # attention = self.attention_network1(fc6_feat, rois)
-            fc6_feat = fc6_feat + attention1
+            fc6_feat = fc6_feat + attention1_2
+            # fc6_feat = fc6_feat + attention1
         else:
             position_embedding_reshape = None
             nongt_dim = 0
@@ -524,7 +529,9 @@ class TwoMLPHead(nn.Module):
         #     fc7_feat = fc7_feat + attention2
         if self.relation_layers_num != 0:
             attention2 = self.attention_network2(fc7_feat, position_embedding_reshape, nongt_dim)
-            fc7_feat = fc7_feat + attention2
+            attention2_2 = self.attention_network2_2(attention2, position_embedding_reshape, nongt_dim)
+            fc7_feat = fc7_feat + attention2_2
+            # fc7_feat = fc7_feat + attention2
         fc7_feat_new = F.relu(fc7_feat)
 
         return fc7_feat_new

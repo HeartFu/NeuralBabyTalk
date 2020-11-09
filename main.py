@@ -37,6 +37,7 @@ import pdb
 # def add_summary_value(writer, key, value, iteration):
 #     summary = tf.Summary(value=[tf.Summary.Value(tag=key, simple_value=value)])
 #     writer.add_summary(summary, iteration)
+from relation_utils import prepare_graph_variables
 
 
 def train(epoch, opt):
@@ -60,11 +61,18 @@ def train(epoch, opt):
     progress_bar = tqdm(dataloader, desc='|Train Epoch {}'.format(epoch), leave=False)
     for step, data in enumerate(progress_bar):
         count += 1
-        img, iseq, gts_seq, num, proposals, bboxs, box_mask, img_id = data
+        img, iseq, gts_seq, num, proposals, bboxs, box_mask, img_id, spa_adj_matrix, sem_adj_matrix = data
+        # if img_id.item() == 262284:
+        #     import pdb
+        #     pdb.set_trace()
         # print("images ids: {}".format(img_id))
         proposals = proposals[:, :max(int(max(num[:, 1])), 1), :]
         bboxs = bboxs[:, :int(max(num[:, 2])), :]
         box_mask = box_mask[:, :, :max(int(max(num[:, 2])), 1), :]
+        if len(spa_adj_matrix[0]) != 0:
+            spa_adj_matrix = spa_adj_matrix[:, :max(int(max(num[:, 1])), 1), :max(int(max(num[:, 1])), 1)]
+        if len(sem_adj_matrix[0]) != 0:
+            sem_adj_matrix = sem_adj_matrix[:, :max(int(max(num[:, 1])), 1), :max(int(max(num[:, 1])), 1)]
 
         # with torch.no_grad():
         input_imgs.resize_(img.size()).copy_(img)
@@ -74,6 +82,7 @@ def train(epoch, opt):
         input_ppls.resize_(proposals.size()).copy_(proposals)
         gt_bboxs.resize_(bboxs.size()).copy_(bboxs)
         mask_bboxs.resize_(box_mask.size()).copy_(box_mask)
+
         # mask_bboxs.resize_(box_mask.size()).copy_(box_mask)
 
         # mask_bboxs = mask_bboxs.bool()
@@ -85,6 +94,12 @@ def train(epoch, opt):
         # gt_bboxs.data.resize_(bboxs.size()).copy_(bboxs)
         # mask_bboxs.data.resize_(box_mask.size()).copy_(box_mask)
         loss = 0
+
+        # relationship modify
+        pos_emb_var, spa_adj_matrix, sem_adj_matrix = prepare_graph_variables(opt.relation_type, input_ppls, sem_adj_matrix, spa_adj_matrix,
+                                                              opt.nongt_dim, opt.imp_pos_emb_dim, opt.spa_label_num,
+                                                              opt.sem_label_num)
+
         if opt.self_critical:
             rl_loss, bn_loss, fg_loss, cider_score = model(input_imgs, input_seqs, gt_seqs, input_num, input_ppls,
                                                            gt_bboxs, mask_bboxs, 'RL')
@@ -94,7 +109,7 @@ def train(epoch, opt):
 
         else:
             lm_loss, bn_loss, fg_loss = model(input_imgs, input_seqs, gt_seqs, input_num, input_ppls, gt_bboxs,
-                                              mask_bboxs, 'MLE')
+                                              mask_bboxs, 'MLE', pos_emb_var, spa_adj_matrix, sem_adj_matrix)
             loss += (lm_loss.sum() + bn_loss.sum() + fg_loss.sum()) / lm_loss.numel()
 
             # FF: modify data[0] to tensor.item()
@@ -115,6 +130,7 @@ def train(epoch, opt):
         # if opt.finetune_cnn:
         #     utils.clip_gradient(cnn_optimizer, opt.grad_clip)
         #     cnn_optimizer.step()
+
         progress_bar.set_postfix({'lm_loss': '{:.3f}'.format(lm_loss.sum().item() / lm_loss.numel()),
                                   'bn_loss': '{:.3f}'.format(bn_loss.sum().item() / lm_loss.numel()),
                                   'fg_loss': '{:.3f}'.format(fg_loss.sum().item() / lm_loss.numel()),
@@ -124,6 +140,7 @@ def train(epoch, opt):
                                   'lr': '{:.5f}'.format(opt.learning_rate),
                                   },
                                  refresh=True)
+
         # if step % opt.disp_interval == 0 and step != 0:
         #     end = time.time()
         #     lm_loss_temp /= opt.disp_interval
@@ -169,18 +186,24 @@ def train(epoch, opt):
             # loss_history[iteration] = loss.data[0]
             lr_history[iteration] = opt.learning_rate
             # ss_prob_history[iteration] = model.ss_prob
+
+        # delete empty cache for release some GPU memory
+        del pos_emb_var, spa_adj_matrix, sem_adj_matrix
+        torch.cuda.empty_cache()
+
     end = time.time()
     print(
         "epoch: {}, lm_loss = {:.3f}, bn_loss = {:.3f}, fg_loss = {:.3f}, rl_loss = {:.3f}, cider_score = {:.3f}, lr = {:.5f}, time/batch = {:.3f}" \
         .format(epoch, lm_loss_temp / count, bn_loss_temp / count, fg_loss_temp / count, rl_loss_temp / count,
                 cider_temp / count, opt.learning_rate, end - start))
     # return lm_loss_temp/count, bn_loss_temp/count, fg_loss_temp/count, total_loss_temp/count
-    wandb.log({
-        'lm_loss_epoch': lm_loss_temp / count / lm_loss.numel(),
-        'bn_loss_epoch': bn_loss_temp / count,
-        'fg_loss_epoch': fg_loss_temp / count,
-        'total_loss_epoch': total_loss_temp / count,
-    })
+    if wandb is not None:
+        wandb.log({
+            'lm_loss_epoch': lm_loss_temp / count / lm_loss.numel(),
+            'bn_loss_epoch': bn_loss_temp / count,
+            'fg_loss_epoch': fg_loss_temp / count,
+            'total_loss_epoch': total_loss_temp / count,
+        })
 
 
 # def eval(opt):
@@ -261,13 +284,18 @@ def train(epoch, opt):
 #python main.py --path_opt cfgs/normal_coco_res101.yml --batch_size 20 --cuda True --num_workers 4 --max_epoch 50 --proposal_h5 detector.json --mGPUs True
 # python main.py --path_opt cfgs/normal_coco_res101.yml --batch_size 20 --cuda True --num_workers 4 --max_epoch 50 --proposal_h5 detector.json --mGPUs True
 if __name__ == '__main__':
-    wandb.init(project="test")
     opt = opts.parse_opt()
     if opt.path_opt is not None:
         with open(opt.path_opt, 'r') as handle:
             options_yaml = yaml.load(handle, Loader=yaml.FullLoader)
         utils.update_values(options_yaml, vars(opt))
     print(opt)
+    debug = True
+    if not debug:
+        wandb.init(project="neural_baby_talk")
+    else:
+        wandb = None
+
     cudnn.benchmark = True
     # print(opt.proposal_h5)
     if opt.dataset == 'flickr30k':
@@ -298,6 +326,7 @@ if __name__ == '__main__':
     gt_seqs = torch.LongTensor(1)
     input_num = torch.LongTensor(1)
 
+
     if opt.cuda:
         input_imgs = input_imgs.cuda()
         input_seqs = input_seqs.cuda()
@@ -314,6 +343,7 @@ if __name__ == '__main__':
     input_ppls = Variable(input_ppls)
     gt_bboxs = Variable(gt_bboxs)
     mask_bboxs = Variable(mask_bboxs)
+
 
     ####################################################################################
     # Build the Model
@@ -409,7 +439,10 @@ if __name__ == '__main__':
     # learning_rate_list = np.linspace(opt.learning_rate, 0.0005, opt.max_epochs)
 
     # monitor the model with wandb
-    wandb.watch(model)
+    if wandb is not None:
+        wandb.watch(model)
+
+    print(model)
 
     for epoch in range(start_epoch, opt.max_epochs):
         if epoch > opt.learning_rate_decay_start and opt.learning_rate_decay_start >= 0:

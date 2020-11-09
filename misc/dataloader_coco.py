@@ -156,9 +156,26 @@ class DataLoader(data.Dataset):
         self.split_ix = []
         for ix in range(len(self.info['images'])):
             img = self.info['images'][ix]
+            # img_id = img['id']
+            # check the number of proposal, if it is 0, drop it.
+            # if self.dataloader_ppls[ix]['nms_num'] == 0:
+            #     continue
             if img['split'] == split:
                 self.split_ix.append(ix)
         print('assigned %d images to split %s' %(len(self.split_ix), split))
+
+        # load relationship matrix
+        if opt.relation_type == 'spatial':
+            # load spatial matrix
+            self.spatial_matrix = json.load(open(opt.spatial_path))
+        else:
+            self.spatial_matrix = []
+
+        if opt.relation_type == 'semantic':
+            self.semantic_matrix = json.load(open(opt.semantic_path))
+        else:
+            self.semantic_matrix = []
+
 
     def get_det_word(self, gt_bboxs, captions, ngram=2):
         # get the present category.
@@ -356,8 +373,28 @@ class DataLoader(data.Dataset):
         else:
             img = self.ToTensor(img)
             img = self.res_Normalize(img)
-
-        return img, input_seq, gt_seq, num, pad_proposals, pad_gt_bboxs, pad_box_mask, image_id
+        # print(image_id)
+        # relationship matrix get
+        if len(self.spatial_matrix) != 0:
+            spatial = np.asarray(self.spatial_matrix[str(image_id)])
+            pad_spatial = np.zeros((self.max_proposal, self.max_proposal))
+            if len(spatial) != 0:
+                num_spatial = min(spatial.shape[0], self.max_proposal)
+                pad_spatial[:num_spatial, :num_spatial] = spatial[:num_spatial, :num_spatial]
+            # extend spatial to 100 * 100
+            # if len(spatial) == 0:
+            #     spatial = np.asarray([[0]])
+        else:
+            pad_spatial = np.asarray([])
+        if len(self.semantic_matrix) != 0:
+            semantic = np.asarray(self.semantic_matrix[str(image_id)])
+            pad_semantic = np.zeros((self.max_proposal, self.max_proposal))
+            if len(semantic) != 0:
+                num_semantic = min(semantic.shape[0], self.max_proposal)
+                pad_semantic[:num_semantic, :num_semantic] = semantic[:num_semantic, :num_semantic]
+        else:
+            pad_semantic = np.asarray([])
+        return img, input_seq, gt_seq, num, pad_proposals, pad_gt_bboxs, pad_box_mask, image_id, pad_spatial, pad_semantic
 
     def __len__(self):
         return len(self.split_ix)
