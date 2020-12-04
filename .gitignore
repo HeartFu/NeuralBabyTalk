@@ -84,7 +84,7 @@ db.sqlite3
 
 # Demo
 visu/
-visu.json
+visu/visu.json
 
 
 # classifier

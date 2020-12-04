@@ -165,13 +165,13 @@ class DataLoader(data.Dataset):
         print('assigned %d images to split %s' %(len(self.split_ix), split))
 
         # load relationship matrix
-        if opt.relation_type == 'spatial':
+        if opt.relation_type == 'spatial' or opt.spa_model:
             # load spatial matrix
             self.spatial_matrix = json.load(open(opt.spatial_path))
         else:
             self.spatial_matrix = []
 
-        if opt.relation_type == 'semantic':
+        if opt.relation_type == 'semantic' or opt.sem_model:
             self.semantic_matrix = json.load(open(opt.semantic_path))
         else:
             self.semantic_matrix = []

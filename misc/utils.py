@@ -583,7 +583,7 @@ def _jitter_boxes(gt_boxes, jitter=0.05):
     return jittered_boxes
 
 
-color_pad = ['red', 'green', 'blue', 'cyan', 'brown', 'orange']
+color_pad = ['red', 'green', 'blue', 'cyan', 'brown', 'orange', 'yellow', 'purple', 'hotpink', 'navajowhite']
 
 def vis_detections(ax, class_name, dets, color_i, rest_flag=0):
     """Visual debugging of detections."""
@@ -591,6 +591,8 @@ def vis_detections(ax, class_name, dets, color_i, rest_flag=0):
     score = dets[-1]
 
     if rest_flag == 0:
+        if color_i >= len(color_pad):
+            color_i = 0
         ax.add_patch(
             patches.Rectangle(
                 (bbox[0], bbox[1]),

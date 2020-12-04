@@ -161,7 +161,7 @@ def torch_extract_position_embedding(position_mat, feat_dim, wave_length=1000):
     dim_mat = torch.pow(torch.ones((1,)) * wave_length,
                         (8. / feat_dim) * feat_range)
 
-    dim_mat = dim_mat.view(1, 1, 1, -1).cuda()
+    dim_mat = dim_mat.view(1, 1, 1, -1)
     position_mat = torch.unsqueeze(100.0 * position_mat, dim=4)
     div_mat = torch.div(position_mat, dim_mat)
     sin_mat = torch.sin(div_mat)
@@ -199,22 +199,35 @@ def torch_broadcast_adj_matrix(adj_matrix, label_num=11):
 
 def prepare_graph_variables(relation_type, bb, sem_adj_matrix, spa_adj_matrix,
                             nongt_dim, pos_emb_dim, spa_label_num,
-                            sem_label_num):
+                            sem_label_num, eval_opt=None):
+    if eval_opt is None:
+        eval_opt = {
+            'imp_model': False,
+            'spa_model': False,
+            'sem_model': False,
+            'graph_att': True,
+        }
     pos_emb_var, sem_adj_matrix_var, spa_adj_matrix_var = None, None, None
-    if relation_type == 'spatial':
+    if relation_type == 'spatial' or eval_opt['spa_model']:
         assert spa_adj_matrix.dim() > 2, "Found spa_adj_matrix of wrong shape"
         # spa_adj_matrix = spa_adj_matrix[:, :num_objects, :num_objects]
-        spa_adj_matrix = torch_broadcast_adj_matrix(
-            spa_adj_matrix, label_num=spa_label_num)
-        spa_adj_matrix_var = Variable(spa_adj_matrix).cuda()
-    if relation_type == 'implicit':
+        if eval_opt['graph_att']:
+            spa_adj_matrix_bc = torch_broadcast_adj_matrix(
+                spa_adj_matrix, label_num=spa_label_num)
+            spa_adj_matrix_var = Variable(spa_adj_matrix_bc).cuda()
+        else:
+            spa_adj_matrix_var = Variable(spa_adj_matrix).cuda()
+    if relation_type == 'implicit' or eval_opt['imp_model']:
         pos_mat = torch_extract_position_matrix(bb, nongt_dim=nongt_dim)
         pos_emb = torch_extract_position_embedding(
             pos_mat, feat_dim=pos_emb_dim)
         pos_emb_var = Variable(pos_emb).cuda()
-    if relation_type == 'semantic':
+    if relation_type == 'semantic' or eval_opt['sem_model']:
         assert sem_adj_matrix.dim() > 2, "Found sem_adj_matrix of wrong shape"
-        sem_adj_matrix = torch_broadcast_adj_matrix(
-            sem_adj_matrix, label_num=sem_label_num)
-        sem_adj_matrix_var = Variable(sem_adj_matrix).cuda()
+        if eval_opt['graph_att']:
+            sem_adj_matrix_bc = torch_broadcast_adj_matrix(
+                sem_adj_matrix, label_num=sem_label_num)
+            sem_adj_matrix_var = Variable(sem_adj_matrix_bc).cuda()
+        else:
+            sem_adj_matrix_var = Variable(sem_adj_matrix).cuda()
     return pos_emb_var, spa_adj_matrix_var, sem_adj_matrix_var

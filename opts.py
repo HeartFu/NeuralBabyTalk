@@ -13,10 +13,10 @@ def parse_opt():
                     help='path to the json containing the preprocessed dataset')
     # parser.add_argument('--image_path', type=str, default='/srv/share/datasets/coco/images',
     #                 help='path to the h5file containing the image data')
-    parser.add_argument('--image_path', type=str, default='/home/fanfu/newdisk/dataset/coco/2014/images',
-                    help='path to the h5file containing the image data')
-    # parser.add_argument('--image_path', type=str, default='/import/nobackup_mmv_ioannisp/shared/datasets/coco2014/images',
-    #                   help='path to the h5file containing the image data')
+    # parser.add_argument('--image_path', type=str, default='/home/fanfu/newdisk/dataset/coco/2014/images',
+    #                 help='path to the h5file containing the image data')
+    parser.add_argument('--image_path', type=str, default='/import/nobackup_mmv_ioannisp/shared/datasets/coco2014/images',
+                      help='path to the h5file containing the image data')
     parser.add_argument('--proposal_h5', type=str, default='data/coco/coco_detection.h5',
                     help='path to the json containing the detection result.') 
     parser.add_argument('--cnn_backend', type=str, default='res101',
@@ -57,6 +57,8 @@ def parse_opt():
                     help='image random crop size')
     parser.add_argument('--image_crop_size', type=int, default=512,
                     help='image random crop size')
+    parser.add_argument('--inplace', type=bool, default=True,
+                    help='Relu inplace setting for reducing GPU memory')
 
     # Optimization: General
     parser.add_argument('--max_epochs', type=int, default=30,
@@ -168,7 +170,7 @@ def parse_opt():
                     help='type of relationship')
     parser.add_argument('--spatial_path', type=str, default='data/coco/relationship/spatial_info.json',
                     help='spatial matrix json path')
-    parser.add_argument('--semantic_path', type=str, default='data/coco/relationship/semantic_info.json',
+    parser.add_argument('--semantic_path', type=str, default='data/coco/relationship/sematic_info.json',
                     help='semantic matrix json path')
     parser.add_argument('--relation_dim', type=int, default=1024,
                     help='relation feature dim')
@@ -186,6 +188,8 @@ def parse_opt():
     parser.add_argument('--label_bias', action='store_true',
                     help='Enable bias term for relation labels \
                                   in relation encoder')
+    parser.add_argument('--graph_attention', type=bool, default=False,
+                    help='Enable graph_attention module, otherwise, use the graph convolution layer')
     # split the relation type
     # parser.add_argument('--implicit_type', action='store_true',
     #                 help='Enable implicit relation module to add the pooling feature')
@@ -204,6 +208,32 @@ def parse_opt():
     parser.add_argument('--sem_label_num', type=int, default=15,
                         help='number of edge labels in \
                                   semantic relation graph')
+
+    # inference relation module
+    parser.add_argument('--imp_pro', type=float, default=0.4,
+                        help='implicit relation weight')
+    parser.add_argument('--spa_pro', type=float, default=0.3,
+                        help='spatial relation weight')
+    parser.add_argument('--sem_pro', type=float, default=0.3,
+                        help='semantic relation weight')
+    parser.add_argument('--imp_start_from', type=str, default='save/bs100_implicit',
+                        help='implicit relationship model weight path')
+    parser.add_argument('--spa_start_from', type=str, default='save/bs100_spatial',
+                        help='spatial relationship model weight path')
+    parser.add_argument('--sem_start_from', type=str, default='save/bs100_semantic',
+                        help='semantic relationship model weight path')
+    parser.add_argument('--imp_model',action='store_true',
+                        help='Whether use implicit model to inference')
+    parser.add_argument('--spa_model', action='store_true',
+                        help='Whether use spatial model to inference')
+    parser.add_argument('--sem_model', action='store_true',
+                        help='Whether use semantic model to inference')
+
+    # parser.add_argument('--att_weight_save', type=str, default='save/attention_weights/',
+    #                     help="The save path of attetion weights.")
+    parser.add_argument('--att_weight_save', type=str, default='/import/nobackup_mmv_ioannisp/tx301/vg_feature/attention_weights/',
+                        help="The save path of attetion weights.")
+
     args = parser.parse_args()
 
     return args

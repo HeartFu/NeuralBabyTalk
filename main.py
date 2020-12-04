@@ -96,9 +96,17 @@ def train(epoch, opt):
         loss = 0
 
         # relationship modify
-        pos_emb_var, spa_adj_matrix, sem_adj_matrix = prepare_graph_variables(opt.relation_type, input_ppls, sem_adj_matrix, spa_adj_matrix,
+        eval_opt = {
+            'imp_model': False,
+            'spa_model': False,
+            'sem_model': False,
+            'graph_att': opt.graph_attention,
+        }
+        pos_emb_var, spa_adj_matrix, sem_adj_matrix = prepare_graph_variables(opt.relation_type, proposals[:, :, :4], sem_adj_matrix, spa_adj_matrix,
                                                               opt.nongt_dim, opt.imp_pos_emb_dim, opt.spa_label_num,
-                                                              opt.sem_label_num)
+                                                              opt.sem_label_num, eval_opt)
+        # print(spa_adj_matrix.size())
+        # print(input_ppls.size())
 
         if opt.self_critical:
             rl_loss, bn_loss, fg_loss, cider_score = model(input_imgs, input_seqs, gt_seqs, input_num, input_ppls,
@@ -282,7 +290,7 @@ def train(epoch, opt):
 ####################################################################################
 # initialize the data holder.
 #python main.py --path_opt cfgs/normal_coco_res101.yml --batch_size 20 --cuda True --num_workers 4 --max_epoch 50 --proposal_h5 detector.json --mGPUs True
-# python main.py --path_opt cfgs/normal_coco_res101.yml --batch_size 20 --cuda True --num_workers 4 --max_epoch 50 --proposal_h5 detector.json --mGPUs True
+# python main.py --path_opt cfgs/normal_coco_res101.yml --batch_size 4 --cuda True --num_workers 1 --max_epoch 50 --proposal_h5 detector.json --mGPUs True
 if __name__ == '__main__':
     opt = opts.parse_opt()
     if opt.path_opt is not None:
@@ -290,7 +298,7 @@ if __name__ == '__main__':
             options_yaml = yaml.load(handle, Loader=yaml.FullLoader)
         utils.update_values(options_yaml, vars(opt))
     print(opt)
-    debug = True
+    debug = False
     if not debug:
         wandb.init(project="neural_baby_talk")
     else:

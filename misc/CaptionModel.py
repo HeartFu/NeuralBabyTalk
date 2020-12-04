@@ -120,6 +120,8 @@ class CaptionModel(nn.Module):
             for every previous beam we now many new possibilities to branch out
             we need to resort our beams to maintain the loop invariant of keeping
             the top beam_size most likely sequences."""
+            import pdb
+            pdb.set_trace()
             det_prob = F.log_softmax(det_prob, dim=1)
             decoded = F.log_softmax(self.logit(rnn_output), dim=1)
             lambda_v = det_prob[:,0].contiguous()
@@ -149,7 +151,8 @@ class CaptionModel(nn.Module):
                                         rnn_output,
                                         beam_pnt_mask_list[-1].t(),
                                         state)
-
+            # import pdb
+            # pdb.set_trace()
             # encode as vectors
             it = beam_seq[t].cuda()
             roi_idx = it.clone() - self.vocab_size - 1 # starting from 0

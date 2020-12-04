@@ -168,7 +168,8 @@ class AttModel(CaptionModel):
                 num_heads=opt.num_heads, num_steps=opt.num_steps,
                 nongt_dim=opt.nongt_dim,
                 residual_connection=opt.residual_connection,
-                label_bias=opt.label_bias
+                label_bias=opt.label_bias,
+                graph_att=opt.graph_attention
             )
         elif opt.relation_type == 'semantic':
             self.v_relation = ExplicitRelationEncoder(
@@ -177,7 +178,8 @@ class AttModel(CaptionModel):
                 num_heads=opt.num_heads,
                 num_steps=opt.num_steps, nongt_dim=opt.nongt_dim,
                 residual_connection=opt.residual_connection,
-                label_bias=opt.label_bias)
+                label_bias=opt.label_bias,
+                graph_att=opt.graph_attention)
 
     def _reinit_word_weight(self, opt, ctoi, wtoi):
         self.det_fc[0].weight.data.copy_(opt.glove_clss)
@@ -194,9 +196,9 @@ class AttModel(CaptionModel):
                 pdb.set_trace()
             self.embed[0].weight.data[idx_old].copy_(self.embed[0].weight.data[idx_new])
 
-    def forward(self, img, seq, gt_seq, num, ppls, gt_boxes, mask_boxes, opt, pos_emb=None, spa_adj_matrix=None, eval_opt={}):
+    def forward(self, img, seq, gt_seq, num, ppls, gt_boxes, mask_boxes, opt, pos_emb=None, spa_adj_matrix=None, sem_adj_matrix=None, eval_opt={}):
         if opt == 'MLE':
-            return self._forward(img, seq, ppls, gt_boxes, mask_boxes, num, pos_emb, spa_adj_matrix)
+            return self._forward(img, seq, ppls, gt_boxes, mask_boxes, num, pos_emb, spa_adj_matrix, sem_adj_matrix)
         elif opt == 'RL':
             # with torch.no_grad():
             greedy_result = self._sample(Variable(img.data, volatile=True), Variable(ppls.data, volatile=True), \
@@ -213,7 +215,7 @@ class AttModel(CaptionModel):
             return lm_loss, bn_loss, fg_loss, cider_score
 
         elif opt == 'sample':
-            seq, bn_seq, fg_seq, seqLogprobs, bnLogprobs, fgLogprobs = self._sample(img, ppls, num, pos_emb, spa_adj_matrix, eval_opt)
+            seq, bn_seq, fg_seq, seqLogprobs, bnLogprobs, fgLogprobs = self._sample(img, ppls, num, pos_emb, spa_adj_matrix, sem_adj_matrix, eval_opt)
             return Variable(seq), Variable(bn_seq), Variable(fg_seq)
 
     def init_hidden(self, bsz):
@@ -226,12 +228,12 @@ class AttModel(CaptionModel):
         if self.relation_type == 'implicit':
             # parepare position embedding
             # implicit_pos_emb = extract_implict_position(rois, self.nongt_dim, self.imp_pos_emb_dim)
-            pool_feats = self.v_relation.forward(pool_feats, implicit_pos_emb)
+            pool_feats, attention_weight = self.v_relation.forward(pool_feats, implicit_pos_emb)
         elif self.relation_type == 'spatial':
-            pool_feats = self.v_relation.forward(pool_feats, spa_adj_matrix)
-        elif self.relation_type == 'implicit':
-            pool_feats = self.v_relation.forward(pool_feats, sem_adj_matrix)
-        return pool_feats
+            pool_feats, attention_weight = self.v_relation.forward(pool_feats, spa_adj_matrix)
+        elif self.relation_type == 'semantic':
+            pool_feats, attention_weight = self.v_relation.forward(pool_feats, sem_adj_matrix)
+        return pool_feats, attention_weight
 
 
     def _forward(self, img, seq, ppls, gt_boxes, mask_boxes, num, pos_emd=None, spa_adj_matrix=None, sem_adj_matrix=None):
@@ -274,7 +276,7 @@ class AttModel(CaptionModel):
         pool_feats = pool_feats.view(batch_size, rois_num, self.att_feat_size)
 
         # relation module
-        pool_feats = self.add_relation_feat(pool_feats, pos_emd, spa_adj_matrix, sem_adj_matrix)
+        pool_feats,_ = self.add_relation_feat(pool_feats, pos_emd, spa_adj_matrix, sem_adj_matrix)
 
         loc_input = ppls.data.new(batch_size, rois_num, 5)
         loc_input[:, :, :4] = ppls.data[:, :, :4] / self.image_crop_size
@@ -395,7 +397,7 @@ class AttModel(CaptionModel):
         rois_num = ppls.size(1)
 
         if beam_size > 1 or self.cbs:
-            return self._sample_beam(img, ppls, num, opt)
+            return self._sample_beam(img, ppls, num, pos_emb, spa_adj_matrix, sem_adj_matrix, opt)
 
         if self.finetune_cnn:
             conv_feats, fc_feats = self.cnn(img)
@@ -415,7 +417,7 @@ class AttModel(CaptionModel):
         pool_feats = pool_feats.view(batch_size, rois_num, self.att_feat_size)
 
         # relationship
-        pool_feats = self.add_relation_feat(pool_feats, pos_emb, spa_adj_matrix, sem_adj_matrix)
+        pool_feats, _ = self.add_relation_feat(pool_feats, pos_emb, spa_adj_matrix, sem_adj_matrix)
 
         loc_input = ppls.data.new(batch_size, rois_num, 5)
         loc_input[:, :, :4] = ppls.data[:, :, :4] / self.image_crop_size
@@ -570,7 +572,7 @@ class AttModel(CaptionModel):
 
         return seq, bn_seq, fg_seq, seqLogprobs, bnLogprobs, fgLogprobs
 
-    def _sample_beam(self, img, ppls, num, opt={}):
+    def _sample_beam(self, img, ppls, num, pos_emb, spa_adj_matrix, sem_adj_matrix, opt={}):
 
         batch_size = ppls.size(0)
         rois_num = ppls.size(1)
@@ -635,6 +637,9 @@ class AttModel(CaptionModel):
         pool_feats = self.roi_align(conv_feats, Variable(rois.view(-1, 5)))
         pool_feats = pool_feats.view(batch_size, rois_num, self.att_feat_size)
 
+        # add relationship
+        pool_feats, _ = self.add_relation_feat(pool_feats, pos_emb, spa_adj_matrix, sem_adj_matrix)
+
         loc_input = ppls.data.new(batch_size, rois_num, 5)
         loc_input[:, :, :4] = ppls.data[:, :, :4] / self.image_crop_size
         loc_input[:, :, 4] = ppls.data[:, :, 5]
@@ -687,7 +692,8 @@ class AttModel(CaptionModel):
 
             it = fc_feats.data.new(beam_size).long().zero_()
             xt = self.embed(Variable(it))
-
+            import pdb
+            pdb.set_trace()
             rnn_output, det_prob, state = self.core(xt, beam_fc_feats, beam_conv_feats, beam_p_conv_feats, \
                                                     beam_pool_feats, beam_p_pool_feats, beam_pnt_mask, beam_pnt_mask,
                                                     state)
@@ -727,3 +733,111 @@ class AttModel(CaptionModel):
                 fgLogprobs[:, k] = self.done_beams[k][0]['fg_logps'].cuda()
 
         return seq.t(), bn_seq.t(), fg_seq.t(), seqLogprobs.t(), bnLogprobs.t(), fgLogprobs.t()
+
+    def fusion_sample_beam(self, img, ppls, num, pos_emb, spa_adj_matrix, sem_adj_matrix, opt={}):
+        batch_size = ppls.size(0)
+        rois_num = ppls.size(1)
+
+        if self.cbs:
+            assert batch_size == 1  # cbs only support batch_size == 1 now.
+            tag_size = opt.get('tag_size', 3)
+            if self.cbs_mode == 'unique':  # re-organize the ppls and make non-same at the top.
+                unique_idx = []
+                unique_clss = []
+                for i in range(num.data[0, 1]):
+                    det_clss = ppls.data[0, i, 4]
+                    det_confidence = ppls.data[0, i, 5]
+                    if det_clss not in unique_clss and det_confidence > 0.8:
+                        unique_clss.append(det_clss)
+                        unique_idx.append(i)
+                tag_size = min(len(unique_idx), tag_size)
+                for i in range(num.data[0, 1]):
+                    if i not in unique_idx:
+                        unique_idx.append(i)
+                if len(unique_idx) > 0:
+                    ppls[0] = ppls[0][unique_idx]
+            elif self.cbs_mode == 'novel':  # force decode only novel concept
+                novel_idx = []
+                novel_clss = []
+                for i in range(num.data[0, 1]):
+                    det_clss = int(ppls.data[0, i, 4])
+                    det_confidence = ppls.data[0, i, 5]
+                    if det_clss in utils.noc_index and det_clss not in novel_clss and det_confidence > 0.8:
+                        novel_clss.append(det_clss)
+                        novel_idx.append(i)
+                tag_size = min(len(novel_idx), tag_size)
+                for i in range(num.data[0, 1]):
+                    if i not in novel_idx:
+                        novel_idx.append(i)
+                if len(novel_idx) > 0:
+                    ppls[0] = ppls[0][novel_idx]
+            elif self.cbs_mode == 'all':
+                tag_size = min(num.data[0, 1], tag_size)
+            _, tags = utils.cbs_beam_tag(tag_size)
+            beam_size = len(tags) * opt.get('beam_size', 3)
+            opt['beam_size'] = beam_size
+        else:
+            beam_size = opt.get('beam_size', 10)
+
+        if self.finetune_cnn:
+            conv_feats, fc_feats = self.cnn(img)
+        else:
+            # with torch.no_grad():
+            # FF: Modify Variable to Tensor for Pytorch 1.0.5
+            # conv_feats, fc_feats = self.cnn(Variable(img.data, volatile=True))
+            with torch.no_grad():
+                conv_feats, fc_feats = self.cnn(img.data)
+                # conv_feats = Variable(conv_feats.data)
+                # fc_feats = Variable(fc_feats.data)
+
+        # conv_feats, fc_feats = self.cnn(img)
+        rois = ppls.data.new(batch_size, rois_num, 5)
+        rois[:, :, 1:] = ppls.data[:, :, :4]
+
+        for i in range(batch_size): rois[i, :, 0] = i
+        pool_feats = self.roi_align(conv_feats, Variable(rois.view(-1, 5)))
+        pool_feats = pool_feats.view(batch_size, rois_num, self.att_feat_size)
+
+        # add relationship
+        pool_feats, attention_weight = self.add_relation_feat(pool_feats, pos_emb, spa_adj_matrix, sem_adj_matrix)
+
+        loc_input = ppls.data.new(batch_size, rois_num, 5)
+        loc_input[:, :, :4] = ppls.data[:, :, :4] / self.image_crop_size
+        loc_input[:, :, 4] = ppls.data[:, :, 5]
+        loc_feats = self.loc_fc(Variable(loc_input))
+
+        label_input = ppls.data.new(batch_size, rois_num).long()
+        label_input[:, :] = ppls.data[:, :, 4]
+        label_feat = self.det_fc(Variable(label_input))
+
+        # pool_feats = pool_feats + label_feat
+        pool_feats = torch.cat((pool_feats, loc_feats, label_feat), 2)
+        # transpose the conv_feats
+        conv_feats = conv_feats.view(batch_size, self.att_feat_size, -1).transpose(1, 2).contiguous()
+        # embed fc and att feats
+        pool_feats = self.pool_embed(pool_feats)
+        fc_feats = self.fc_embed(fc_feats)
+        conv_feats = self.att_embed(conv_feats)
+
+        # Project the attention feats first to reduce memory and computation comsumptions.
+        p_conv_feats = self.ctx2att(conv_feats)
+        p_pool_feats = self.ctx2pool(pool_feats)
+
+        # constructing the mask.
+        pnt_mask = ppls.data.new(batch_size, rois_num + 1).byte().fill_(1)
+        for i in range(batch_size):
+            pnt_mask[i, :num.data[i, 1] + 1] = 0
+        pnt_mask = Variable(pnt_mask)
+
+        # vis_offset = (torch.arange(0, beam_size) * rois_num).view(beam_size).type_as(ppls.data).long()
+        # roi_offset = (torch.arange(0, beam_size) * (rois_num + 1)).view(beam_size).type_as(ppls.data).long()
+
+        # seq = ppls.data.new(self.seq_length, batch_size).zero_().long()
+        # seqLogprobs = ppls.data.new(self.seq_length, batch_size).float()
+        # bn_seq = ppls.data.new(self.seq_length, batch_size).zero_().long()
+        # bnLogprobs = ppls.data.new(self.seq_length, batch_size).float()
+        # fg_seq = ppls.data.new(self.seq_length, batch_size).zero_().long()
+        # fgLogprobs = ppls.data.new(self.seq_length, batch_size).float()
+        # self.done_beams = [[] for _ in range(batch_size)]
+
+        return beam_size, fc_feats, conv_feats, pool_feats, p_conv_feats, p_pool_feats, pnt_mask, attention_weight

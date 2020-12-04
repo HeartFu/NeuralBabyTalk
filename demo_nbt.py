@@ -274,5 +274,5 @@ if __name__ == '__main__':
     # import pdb
     # pdb.set_trace()
     print('saving...')
-    json.dump(predictions, open('visu.json', 'w'))
+    json.dump(predictions, open('visu/visu.json', 'w'))
 
