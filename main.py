@@ -290,7 +290,7 @@ def train(epoch, opt):
 ####################################################################################
 # initialize the data holder.
 #python main.py --path_opt cfgs/normal_coco_res101.yml --batch_size 20 --cuda True --num_workers 4 --max_epoch 50 --proposal_h5 detector.json --mGPUs True
-# python main.py --path_opt cfgs/normal_coco_res101.yml --batch_size 4 --cuda True --num_workers 1 --max_epoch 50 --proposal_h5 detector.json --mGPUs True
+# python main.py --path_opt cfgs/normal_coco_res101.yml --batch_size 100 --cuda True --num_workers 10 --max_epoch 50 --proposal_h5 detector.json --mGPUs True --graph_attention True
 if __name__ == '__main__':
     opt = opts.parse_opt()
     if opt.path_opt is not None:
@@ -298,7 +298,7 @@ if __name__ == '__main__':
             options_yaml = yaml.load(handle, Loader=yaml.FullLoader)
         utils.update_values(options_yaml, vars(opt))
     print(opt)
-    debug = False
+    debug = True
     if not debug:
         wandb.init(project="neural_baby_talk")
     else:
@@ -394,7 +394,7 @@ if __name__ == '__main__':
             infos = pickle.load(f)
             saved_model_opt = infos['opt']
 
-        # opt.learning_rate = saved_model_opt.learning_rate
+        opt.learning_rate = saved_model_opt.learning_rate
         print('Loading the model %s...' % (model_path))
         model.load_state_dict(torch.load(model_path))
 

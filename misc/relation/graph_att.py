@@ -74,7 +74,10 @@ class GAttNet(nn.Module):
 
         adj_matrix_list = [adj_matrix, adj_matrix.transpose(1, 2)]
 
-        attention_weights = [0] * self.dir_num
+        if not self.training:
+            attention_weights = [0] * self.dir_num
+        else:
+            attention_weights = None
         # Self - looping edges
         # [batch_size,num_rois, out_feat_dim]
         self_feat = self.self_weights(v_feat)
@@ -94,17 +97,25 @@ class GAttNet(nn.Module):
             # import pdb
             # pdb.set_trace()
             # [batch_size,num_rois, out_feat_dim]
-            neighbor_emb[d], attention_weights[d] = self.neighbor_net[d].forward(
-                self_feat, condensed_adj_matrix, pos_emb,
-                v_biases_neighbors)
+            if not self.training:
+                neighbor_emb[d], attention_weights[d] = self.neighbor_net[d].forward(
+                    self_feat, condensed_adj_matrix, pos_emb,
+                    v_biases_neighbors)
+            else:
+                neighbor_emb[d]= self.neighbor_net[d].forward(
+                    self_feat, condensed_adj_matrix, pos_emb,
+                    v_biases_neighbors)
 
             # [batch_size,num_rois, out_feat_dim]
             output = output + neighbor_emb[d]
-        for d in range(self.dir_num):
-            if d == 0:
-                continue
-            attention_weights[0] += attention_weights[d]
-        attention_weights[0] = attention_weights[0] / self.dir_num
+
+        if not self.training:
+            for d in range(self.dir_num):
+                if d == 0:
+                    continue
+                attention_weights[0] += attention_weights[d]
+            attention_weights[0] = attention_weights[0] / self.dir_num
+            attention_weights = attention_weights[0].mean(axis=2, keepdim=False)
         # else:
         #     # import pdb
         #     # pdb.set_trace()
@@ -122,6 +133,6 @@ class GAttNet(nn.Module):
         output = nn.functional.relu(output)
 
         # if self.gatt:
-        return output, attention_weights[0].mean(axis=2, keepdim=False)
+        return output, attention_weights
         # else:
         #     return output, attention_weights

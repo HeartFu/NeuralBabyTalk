@@ -76,10 +76,12 @@ def demo_relationNBT(opt):
     opt.itoc = dataset_val.itoc
 
     # choose the attention model
+    save_name = ''
     if opt.imp_model:
         opt.relation_type = 'implicit'
         imp_model = build_model(opt, opt.imp_start_from)
         imp_model.eval()
+        save_name += '_imp'
     else:
         imp_model = None
 
@@ -87,6 +89,7 @@ def demo_relationNBT(opt):
         opt.relation_type = 'spatial'
         spa_model = build_model(opt, opt.spa_start_from)
         spa_model.eval()
+        save_name += '_spa'
     else:
         spa_model = None
 
@@ -94,15 +97,16 @@ def demo_relationNBT(opt):
         opt.relation_type = 'semantic'
         sem_model = build_model(opt, opt.sem_start_from)
         sem_model.eval()
+        save_name += '_sem'
     else:
         sem_model = None
 
     ####################################################################################
     # Evaluate the model
     ####################################################################################
-    predictions = demo_fusion_models(opt, dataset_val, opt.imp_pro, opt.spa_pro, opt.sem_pro, imp_model, spa_model, sem_model)
+    predictions = demo_fusion_models(opt, dataset_val, opt.imp_pro, opt.spa_pro, opt.sem_pro, imp_model, spa_model, sem_model, save_name)
     print('saving...')
-    json.dump(predictions, open('/import/nobackup_mmv_ioannisp/tx301/vg_feature/visu_relation/visu_relation.json', 'w'))
+    json.dump(predictions, open('/import/nobackup_mmv_ioannisp/tx301/vg_feature/visu_relation/visu_relation'+ save_name + '.json', 'w'))
 
 
 # CUDA_VISIBLE_DEVICES=1 python demo_relation_nbt.py --path_opt cfgs/normal_coco_res101.yml --batch_size 100 --cuda True --num_workers 1 --beam_size 3 --sem_model --spa_model --imp_model --sem_pro 0.3 --spa_pro 0.3 --imp_pro 0.4

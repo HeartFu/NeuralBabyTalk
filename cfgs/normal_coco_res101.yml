@@ -23,4 +23,4 @@ val_split: 'test'
 val_images_use: -1
 cider_df: 'corpus'
 optim: 'adam'
-checkpoint_path: 'save/bs100_graph_conv/'
+checkpoint_path: 'save/test/'

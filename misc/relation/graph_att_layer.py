@@ -90,8 +90,29 @@ class GraphSelfAttentionLayer(nn.Module):
         aff_scale = torch.transpose(aff_scale, 1, 2)
         weighted_aff = aff_scale
 
+        if adj_matrix is not None:
+            # weighted_aff_transposed, [batch_size,num_rois, nongt_dim, num_heads]
+            weighted_aff_transposed = torch.transpose(weighted_aff, 2, 3)
+            zero_vec = -9e15 * torch.ones_like(weighted_aff_transposed)
+
+            adj_matrix = adj_matrix.view(
+                adj_matrix.shape[0], adj_matrix.shape[1],
+                adj_matrix.shape[2], 1)
+            adj_matrix_expand = adj_matrix.expand(
+                (-1, -1, -1,
+                 weighted_aff_transposed.shape[-1]))
+            weighted_aff_masked = torch.where(adj_matrix_expand > 0,
+                                              weighted_aff_transposed,
+                                              zero_vec)
+            # import pdb
+            # pdb.set_trace()
+            weighted_aff_masked = weighted_aff_masked + label_biases_att.unsqueeze(3)
+            weighted_aff = torch.transpose(weighted_aff_masked, 2, 3)
+
         if position_embedding is not None and self.pos_emb_dim > 0:
             # Adding goemetric features
+            # import pdb
+            # pdb.set_trace()
             position_embedding = position_embedding.float()
             # [batch_size,num_rois * nongt_dim, emb_dim]
             position_embedding_reshape = position_embedding.view(
@@ -114,25 +135,6 @@ class GraphSelfAttentionLayer(nn.Module):
 
             weighted_aff += torch.log(threshold_aff)
 
-        if adj_matrix is not None:
-            # weighted_aff_transposed, [batch_size,num_rois, nongt_dim, num_heads]
-            weighted_aff_transposed = torch.transpose(weighted_aff, 2, 3)
-            zero_vec = -9e15 * torch.ones_like(weighted_aff_transposed)
-
-            adj_matrix = adj_matrix.view(
-                adj_matrix.shape[0], adj_matrix.shape[1],
-                adj_matrix.shape[2], 1)
-            adj_matrix_expand = adj_matrix.expand(
-                (-1, -1, -1,
-                 weighted_aff_transposed.shape[-1]))
-            weighted_aff_masked = torch.where(adj_matrix_expand > 0,
-                                              weighted_aff_transposed,
-                                              zero_vec)
-            # import pdb
-            # pdb.set_trace()
-            weighted_aff_masked = weighted_aff_masked + label_biases_att.unsqueeze(3)
-            weighted_aff = torch.transpose(weighted_aff_masked, 2, 3)
-
         # aff_softmax, [batch_size, num_rois, fc_dim, nongt_dim]
         aff_softmax = nn.functional.softmax(weighted_aff, 3)
         # import pdb
@@ -149,4 +151,8 @@ class GraphSelfAttentionLayer(nn.Module):
         # linear_out, [batch_size*num_rois, dim[2], 1, 1]
         linear_out = self.linear_out_(output_t)
         output = linear_out.view((batch_size, num_rois, self.dim[2]))
-        return output, aff_softmax
+
+        if self.training:
+            return output
+        else:
+            return output, aff_softmax

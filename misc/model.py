@@ -164,7 +164,7 @@ class AttModel(CaptionModel):
         elif opt.relation_type == 'spatial':
             self.v_relation = ExplicitRelationEncoder(
                 self.att_feat_size, opt.relation_dim,
-                opt.dir_num, opt.spa_label_num,
+                opt.dir_num, opt.spa_label_num, pos_emb_dim=opt.imp_pos_emb_dim,
                 num_heads=opt.num_heads, num_steps=opt.num_steps,
                 nongt_dim=opt.nongt_dim,
                 residual_connection=opt.residual_connection,
@@ -225,12 +225,13 @@ class AttModel(CaptionModel):
 
 
     def add_relation_feat(self, pool_feats, implicit_pos_emb, spa_adj_matrix, sem_adj_matrix):
+        attention_weight=None
         if self.relation_type == 'implicit':
             # parepare position embedding
             # implicit_pos_emb = extract_implict_position(rois, self.nongt_dim, self.imp_pos_emb_dim)
             pool_feats, attention_weight = self.v_relation.forward(pool_feats, implicit_pos_emb)
         elif self.relation_type == 'spatial':
-            pool_feats, attention_weight = self.v_relation.forward(pool_feats, spa_adj_matrix)
+            pool_feats, attention_weight = self.v_relation.forward(pool_feats, spa_adj_matrix, implicit_pos_emb)
         elif self.relation_type == 'semantic':
             pool_feats, attention_weight = self.v_relation.forward(pool_feats, sem_adj_matrix)
         return pool_feats, attention_weight

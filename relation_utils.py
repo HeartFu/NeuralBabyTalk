@@ -217,7 +217,7 @@ def prepare_graph_variables(relation_type, bb, sem_adj_matrix, spa_adj_matrix,
             spa_adj_matrix_var = Variable(spa_adj_matrix_bc).cuda()
         else:
             spa_adj_matrix_var = Variable(spa_adj_matrix).cuda()
-    if relation_type == 'implicit' or eval_opt['imp_model']:
+    if (relation_type == 'implicit' or eval_opt['imp_model']):
         pos_mat = torch_extract_position_matrix(bb, nongt_dim=nongt_dim)
         pos_emb = torch_extract_position_embedding(
             pos_mat, feat_dim=pos_emb_dim)

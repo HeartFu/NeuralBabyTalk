@@ -2,7 +2,9 @@
 dataset: coco
 input_json: 'data/robust_coco/cap_coco.json'
 input_dic: 'data/robust_coco/dic_coco.json'
-image_path: 'data/coco/images'
+#image_path: 'data/coco/images'
+image_path: '/home/fanfu/newdisk/dataset/coco/2014'
+#image_path: '/import/nobackup_mmv_ioannisp/shared/datasets/coco2014/images'
 proposal_h5: 'data/coco/coco_detection.h5'
 data_path: 'data'
 # language model

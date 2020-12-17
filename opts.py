@@ -229,10 +229,10 @@ def parse_opt():
     parser.add_argument('--sem_model', action='store_true',
                         help='Whether use semantic model to inference')
 
-    # parser.add_argument('--att_weight_save', type=str, default='save/attention_weights/',
-    #                     help="The save path of attetion weights.")
-    parser.add_argument('--att_weight_save', type=str, default='/import/nobackup_mmv_ioannisp/tx301/vg_feature/attention_weights/',
+    parser.add_argument('--att_weight_save', type=str, default='save/robust_coco_1024/attention_weights/',
                         help="The save path of attetion weights.")
+    # parser.add_argument('--att_weight_save', type=str, default='/import/nobackup_mmv_ioannisp/tx301/vg_feature/attention_weights/',
+    #                     help="The save path of attetion weights.")
 
     args = parser.parse_args()
 

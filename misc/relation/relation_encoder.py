@@ -61,7 +61,7 @@ class ImplicitRelationEncoder(nn.Module):
         return imp_v, attention_weights
 
 class ExplicitRelationEncoder(nn.Module):
-    def __init__(self, v_dim, out_dim, dir_num, label_num,
+    def __init__(self, v_dim, out_dim, dir_num, label_num, pos_emb_dim=-1,
                  nongt_dim=20, num_heads=16, num_steps=1,
                  residual_connection=True, label_bias=True, graph_att=True):
         super(ExplicitRelationEncoder, self).__init__()
@@ -71,6 +71,7 @@ class ExplicitRelationEncoder(nn.Module):
         self.residual_connection = residual_connection
         self.graph_att = graph_att
         self.dir_num = dir_num
+        # self.pos_emb_dim = pos_emb_dim
         print("In ExplicitRelationEncoder, num of graph propogation steps:",
               "%d, residual_connection: %s" % (self.num_steps,
                                                self.residual_connection))
@@ -89,16 +90,18 @@ class ExplicitRelationEncoder(nn.Module):
                                          pos_emb_dim=-1, gatt=graph_att)
 
         else:
+            self.bias = FCNet([label_num, 1], '', 0, label_bias)
             self.g_conv_layer = GraphConvolution(in_dim, out_dim)
+            # self.dropout = nn.Dropout(dropout)
             #     neighbor_net.append(g_conv_layer)
             # self.neighbor_net = nn.ModuleList(neighbor_net)
 
-    def forward(self, v, exp_adj_matrix):
+    def forward(self, v, exp_adj_matrix, pos_emb=None):
         """
         Args:
             v: [batch_size, num_rois, v_dim]
             exp_adj_matrix: [batch_size, num_rois, num_rois, num_labels]
-
+            pos_emb: [batch_size, num_rois, nongt_dim, emb_dim] for spatial, otherwise, none
         Returns:
             output: [batch_size, num_rois, out_dim]
         """
@@ -118,7 +121,9 @@ class ExplicitRelationEncoder(nn.Module):
                 # adj_matrix[masks] = 0
                 # import pdb
                 # pdb.set_trace()
-                exp_v_rel = nn.functional.relu(self.g_conv_layer.forward(v_cat_q, exp_adj_matrix.float()))
+                # v_biases_neighbors = self.bias(exp_adj_matrix).squeeze(-1)
+                # exp_v_rel = nn.functional.relu(self.g_conv_layer.forward(v_cat_q, exp_adj_matrix.float()))
+                exp_v_rel = nn.functional.relu(self.g_conv_layer.forward(v_cat_q, exp_adj_matrix))
                 # exp_v_rel = self.g_conv_layer.forward(v_cat_q, exp_adj_matrix.float())
             if self.residual_connection:
                 exp_v += exp_v_rel

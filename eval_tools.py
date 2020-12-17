@@ -163,7 +163,7 @@ def get_rnn_output(model, beam_size, fc_feats, conv_feats, pool_feats, p_conv_fe
            beam_fc_feats, beam_conv_feats, beam_p_conv_feats
 
 
-def demo_fusion_models(opt, dataset_val, imp_pro, spa_pro, sem_pro, imp_model=None, spa_model=None, sem_model=None):
+def demo_fusion_models(opt, dataset_val, imp_pro, spa_pro, sem_pro, imp_model=None, spa_model=None, sem_model=None, save_name=''):
     dataloader_val = torch.utils.data.DataLoader(dataset_val, batch_size=opt.batch_size,
                                                  shuffle=False, num_workers=opt.num_workers)
     input_imgs = torch.FloatTensor(1)
@@ -322,7 +322,7 @@ def demo_fusion_models(opt, dataset_val, imp_pro, spa_pro, sem_pro, imp_model=No
             # plt.tight_layout()
             # import pdb
             # pdb.set_trace()
-            fig.savefig('/import/nobackup_mmv_ioannisp/tx301/vg_feature/visu_relation/%d.jpg' % (img_id[i].item()),
+            fig.savefig('/import/nobackup_mmv_ioannisp/tx301/vg_feature/visu_relation'+ save_name + '/%d.jpg' % (img_id[i].item()),
                         bbox_inches='tight', pad_inches=0, dpi=150)
             # fig.savefig('visu_relation/%d.jpg' % (img_id[i].item()),
             #             bbox_inches='tight', pad_inches=0, dpi=150)
@@ -471,9 +471,10 @@ def fusion_beam_sample(opt, imp_pro, spa_pro, sem_pro, input_ppls, input_imgs, i
     beam_size = eval_opt.get('beam_size', 3)
     batch_size = input_ppls.data.size(0)
     rois_num = input_ppls.data.size(1)
-    attention_weights_imp = torch.zeros(batch_size, rois_num, rois_num)
-    attention_weights_spa = torch.zeros(batch_size, rois_num, rois_num)
-    attention_weights_sem = torch.zeros(batch_size, rois_num, rois_num)
+    nongt_dim = min(rois_num, opt.nongt_dim)
+    attention_weights_imp = torch.zeros(batch_size, rois_num, nongt_dim).cuda()
+    attention_weights_spa = torch.zeros(batch_size, rois_num, nongt_dim).cuda()
+    attention_weights_sem = torch.zeros(batch_size, rois_num, nongt_dim).cuda()
     if imp_model:
         beam_size, fc_feats_imp, conv_feats_imp, pool_feats_imp, p_conv_feats_imp, \
         p_pool_feats_imp, pnt_mask_imp, attention_weights_imp = imp_model.fusion_sample_beam(input_imgs, input_ppls,
